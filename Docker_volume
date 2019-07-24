@@ -1,0 +1,45 @@
+sudo docker rm 6e372
+
+docker ps|grep 6e37
+
+docker volume list
+
+
+sudo docker pull apolloauto/apollo:paddlepaddle_volume-x86_64-1.0.0
+
+
+sudo docker run apolloauto/apollo:paddlepaddle_volume-x86_64-1.0.0
+
+
+sudo docker run -d apolloauto/apollo:paddlepaddle_volume-x86_64-1.0.0
+
+
+docker images
+
+
+docker images|grep apolloauto/apollo:paddlepaddle_volume-x86_64-1.0.0 
+
+sudo docker images|grep apolloauto/apollo:paddlepaddle_volume-x86_64-1.0.0
+
+
+sudo docker pull apolloauto/apollo:paddlepaddle_volume-x86_64-latest
+
+
+sudo docker run -dit apolloauto/apollo:paddlepaddle_volume-x86_64-1.0.0
+
+
+
+sudo docker volume list
+
+
+ sudo docker volume list |grep be99
+
+
+sudo docker ps -a |grep be99
+
+
+sudo docker pull busybox
+
+
+
+sudo docker inspect be99

@@ -1,0 +1,17 @@
+
+Need to install the mkl-dnn library(安装英特尔 MKL-DNN):
+The github link:
+https://software.intel.com/zh-cn/articles/intel-mkl-dnn-part-1-library-overview-and-installation?language=fr
+
+If the download speed is low, use the link instead:
+https://gitee.com/ClannadAs/mkl-dnn/repository/archive/master.zip
+
+Follow the steps to install, the make test step can be skipped.
+https://software.intel.com/zh-cn/articles/intel-mkl-dnn-part-1-library-overview-and-installation?language=fr
+
+After the installation,it should be showwed as below.
+zy@zy:~$ cd /usr/local/lib/
+zy@zy:/usr/local/lib$ ls
+libiomp5.so   libmkldnn.so.0       libmklml_intel.so  python3.5
+libmkldnn.so  libmkldnn.so.0.14.0  python2.7
+zy@zy:/usr/local/lib$ 

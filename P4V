@@ -1,0 +1,42 @@
+1. 目录区分为Depot标签页表示服务器上存储的文件目录结构，和Workspace表示本地存储的文件目录结构
+
+2. 启动P4登录输入服务器地址，输入分配的P4账号，自己创建一个新的Workspace
+
+
+3. 如果客户端让你选择编码方式，请选择UTF8编码
+
+
+4. 如果有多个库，点击Connection->Open Connection可以弹出设置服务器，用户，WorkSpace的窗口
+
+5. Workspace可以理解为，depot到本地的一个映射，对应本地的一个目录
+
+6. WorkSpace可以切换，通过Connection->Switch To Workspace
+
+7. 带感叹号的文件表示本地和服务器不一致，一般这种情况请先更新P4
+   文件目录里没有任何标记的文件是说明服务器上没有的
+   红色问号的表示和服务器上不一样，有冲突的。这种文件不能直接合入
+
+8. refresh某些情况下某些修改不能实时地在p4v中跟新，可以在view->refreash all。也可以在任意文件，目录或changelist右键中找到refresh相关的操作
+
+
+9. 在需要获取资源的目录上右键选择Get Latest Revision，这样可以拉取服务器最新的变更，【重要：每次提交前必须拉取一次】
+
+10.  P4的提交是以Changelist为单位，所有修改过的文件会放在一个Changelist里
+     对要修改的文件，在文件上右键选择CheckOut，会弹出选择Changelist的窗口，可以放在默认或者新建的Changelist下
+	 对要删除的文件可以右键选择Mark for Delete，最好在depot窗口操作，【重要：删除的时候别忘了删除meta文件】，特别是目录也有meta
+	 对新增的文件，需要到WorkSpace视图下选择Mark for Add
+	 
+	 
+11. Reconcile。P4提供一个便捷的方式可以直接对一个目录进行比较，找到和服务器上不同的文件，包括修改，删除，新增。找出之后会自动添加到Changelist中，自动完成上面三种操作
+
+12. 有了Changelist之后，就可以提交了。右键Changelist选择Submit或者点击工具栏里的Submit图标，都会弹出 上传的提示框，输入上传的备注之后就可以提交了。
+	建议每次提交前先对Changelist右键选择Revert Unchanged Files防止提交一些未修改过的文件
+	
+13. 当本地文件和服务器有冲突时文件上会有红色的问号。这时候我们必须首先解决冲突。在冲突文件上右键选择Resolve
+
+14. 然后弹出菜单中有四种选项，Accept Source，Accept Target，Accept Meged，Run Merge Tool。
+	如果希望以自己的为准强行合并，就选择Accept Target一般来说美术资源多选择这个，如果希望以服务器为准就选择Accept Source，Target还是Source可以通过上面显示的信息确认。
+	如果希望让工具自动合并本地和服务器，就选择Accept Merged。如果选择了Run Merged Tool就会弹出Merge工具，人工进行合并
+	
+15. 当进行多线开发的时候会有多线之间互相合并的问题，例如目前的开发线是Client，920版本分支线是0.0.4.0，我们希望把主干的一次提交合并到分支上。
+	我们可以再主干的提交记录History面板中选中历史的Changelist，然后右键选择Merge/Integrate

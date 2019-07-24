@@ -1,0 +1,16 @@
+CyberRT:
+
+1. Talker-Listener
+The first part of demonstrating CyberRT API is to understand the Talker/Listener example. 
+Following are three essential concepts: node (basic unit), reader(facility to read message) and writer(facility to write message) of the example.
+
+2. Create a node
+In the CyberRT framework, the node is the most fundamental unit, similar to the role of a handle. When creating a specific functional object (writer, reader, etc.), you need to create it based on an existing node instance. The node creation interface is as follows:
+
+std::unique_ptr<Node> apollo::cyber::CreateNode(const std::string& node_name, const std::string& name_space = "");
+Parameters:
+node_name: name of the node, globally unique identifier
+name_space: name of the space where the node is located
+name_space is empty by default. It is the name of the space concatenated with node_name. The format is /namespace/node_name
+Return value - An exclusive smart pointer to Node
+Error Conditions - when cyber::Init() has not called, the system is in an uninitialized state, unable to create a node, return nullptr
