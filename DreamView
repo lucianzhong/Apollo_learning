@@ -1,0 +1,27 @@
+1.  Demo
+
+  Select Drive Mode
+	From the dropdown box selet "Navigation" mode
+	bash scripts/bootstrap.sh
+    source /apollo/scripts/apolo_base.sh
+    demo_guide/demo_3.5.record -l
+
+
+
+2. How can I test planning algorithms offline?
+	Use dreamview and enable sim_control on dreamview to test your planning algorithm
+
+	 What's the function of sim_control in the backend of dreamview
+	It simulates a SDC's control module, and moves the car based on planning result. This is a really convenient way to visualize and test planning module
+
+	Purpose of sim control: drive the car based on the planning trajectory. Good for debugging planning algorithms.
+
+	Please note, planning and routing modules (see image below) should be ON while using SimControl. To navigate the ego-car, select either “route editing” or “default routing” from the side bar to define a route. You can turn the sim_control on and off from the toggle. However, a new routing request is needed each time the sim_control is restarted. 
+
+
+
+3. DreamView是一个web应用程序，提供如下的功能：
+
+	可视化显示当前自动驾驶车辆模块的输出信息，例如规划路径、车辆定位、车架信息等。
+	为使用者提供人机交互接口以监测车辆硬件状态，对模块进行开关操作，启动自动驾驶车辆等。
+	提供调试工具，例如PnC监视器可以高效的跟踪模块输出的问题

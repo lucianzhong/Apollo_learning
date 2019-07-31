@@ -1,0 +1,341 @@
+1.
+
+	Bazel是一个类似于Make的编译工具，是Google为其内部软件开发的特点量身定制的工具，如今Google使用它来构建内部大多数的软件。Google认为直接用Makefile构建软件速度太慢，结果不可靠，所以构建了一个新的工具叫做Bazel，Bazel的规则层级更高
+
+
+
+2. 	2.1 建立工作区（workspace）
+		Bazel的编译是基于工作区（workspace）的概念。工作区是一个存放了所有源代码和Bazel编译输出文件的目录，也就是整个项目的根目录。同时它也包含一些Bazel认识的文件：
+
+		WORKSPACE文件，用于指定当前文件夹就是一个Bazel的工作区。所以WORKSPACE文件总是存在于项目的根目录下。
+		一个或多个BUILD文件，用于告诉Bazel怎么构建项目的不同部分。（如果工作区中的一个目录包含BUILD文件，那么它就是一个package。）
+		那么要指定一个目录为Bazel的工作区，就只要在该目录下创建一个空的WORKSPACE文件即可。
+
+		当Bazel编译项目时，所有的输入和依赖项都必须在同一个工作区。属于不同工作区的文件，除非linked否则彼此独立。
+
+		 内含workspace文件的目录，位于该目录内的所有子目录都是工作区间；这个工作区间包括源代码和build输出目录的符号链接（eg: bazel-bin、bazel-out）
+
+
+	2.2 Packages:
+		  只要有BUILD文件的文件夹/目录，都是包，并且位于该包的所有文件或者子目录都属于该包，除非子目录自己有BUILD文件，此时该子目录自称一个包；
+
+
+3.理解BUILD文件
+	一个BUILD文件包含了几种不同类型的指令。其中最重要的是编译指令，它告诉Bazel如何编译想要的输出，比如可执行二进制文件或库。BUILD文件中的每一条编译指令被称为一个target，它指向一系列的源文件和依赖，一个target也可以指向别的target。
+
+	举个例子，下面这个hello-world的target利用了Bazel内置的cc_binary编译指令，来从hello-world.cc源文件（没有其他依赖项）构建一个可执行二进制文件。指令里面有些属性是强制的，比如name，有些属性则是可选的，srcs表示的是源文件。
+
+	cc_binary(
+	    name = "hello-world",
+	    srcs = ["hello-world.cc"],
+	)
+
+
+
+4. Bazel提供了一些编译的例子，在https://github.com/bazelbuild/examples/，可以clone到本地试一下
+
+
+5. 编译你的第一个Bazel项目:
+	首先进入到cpp-tutorial/stage1目录下，然后运行以下指令：
+
+	bazel build //main:hello-world
+
+	注意target中的//main:是BUILD文件相对于WORKSPACE文件的位置，hello-world则是我们在BUILD文件中命名好的target的名字
+
+	Bazel将编译的输出放在项目根目录下的bazel-bin目录下，可以看一下这个目录，理解一下Bazel的输出结构。
+
+	cc_binary(
+    name = "hello-world",
+    srcs = ["hello-world.cc"],
+	)
+
+	让我们来可视化一下我们项目的依赖吧。首先，生成依赖图的一段文字描述（即在工作区根目录下运行下述指令):bazel query --nohost_deps --noimplicit_deps 'deps(//main:hello-world)'  --output graph  
+ 
+	这个指令告诉Bazel查找target //main:hello-world的所有依赖项（不包括host和隐式依赖），然后输出图的文字描述。再把文字描述贴到GraphViz里，你就可以看到如下的依赖图了。
+	http://www.webgraphviz.com/
+
+6.多个target的编译
+	单个target的方式对于小项目来说是高效的，但是对于大项目来说，你可能会想把它拆分成多个target和多个package来实现快速增量的编译（这样就只需要重新编译改变过的部分）
+
+	cc_library(
+    name = "hello-greet",
+    srcs = ["hello-greet.cc"],
+    hdrs = ["hello-greet.h"],
+	)
+
+	cc_binary(
+	    name = "hello-world",
+	    srcs = ["hello-world.cc"],
+	    deps = [
+	        ":hello-greet",
+	    ],
+	)
+    
+    我们看到在这个BUILD文件中，Bazel首先编译了hello-greet这个库（利用Bazel内置的cc_library编译指令），然后编译hello-world这个二进制文件。hello-world这个target的deps属性告诉Bazel，要构建hello-world这个二进制文件需要hello-greet这个库
+
+    进入到cpp-tutorial/stage2目录下然后运行以下指令： bazel build //main:hello-world
+
+
+
+
+7. 多个package的编译
+	我们现在再将项目拆分成多个package。看一下cpp-tutorial/stage3:注意到我们现在有两个子目录了，每个子目录中都包含了BUILD文件。因此，对于Bazel来说，整个工作区现在就包含了两个package：lib和main。
+
+	 lib/BUILD文件长这样：
+
+	cc_library(
+	    name = "hello-time",
+	    srcs = ["hello-time.cc"],
+	    hdrs = ["hello-time.h"],
+	    visibility = ["//main:__pkg__"],
+		)
+
+	main/BUILD文件长这样：
+
+	cc_library(
+	    name = "hello-greet",
+	    srcs = ["hello-greet.cc"],
+	    hdrs = ["hello-greet.h"],
+	)
+
+	cc_binary(
+	    name = "hello-world",
+	    srcs = ["hello-world.cc"],
+	    deps = [
+	        ":hello-greet",
+	        "//lib:hello-time",
+	    ],
+	)
+
+
+	注意到lib/BUILD文件中我们将hello-time这个target显式可见了（通过visibility属性）。这是因为默认情况下，targets只对同一个BUILD文件里的其他targets可见（Bazel使用target visibility来防止像公有API中库的实现细节的泄露等情况）。
+
+
+
+// 8. tensorflow  WORKSPACE
+
+	    workspace(name = "org_tensorflow")
+
+		http_archive(
+		    name = "io_bazel_rules_closure",
+		    sha256 = "6691c58a2cd30a86776dd9bb34898b041e37136f2dc7e24cadaeaf599c95c657",
+		    strip_prefix = "rules_closure-08039ba8ca59f64248bb3b6ae016460fe9c9914f",
+		    urls = [
+		        "https://mirror.bazel.build/github.com/bazelbuild/rules_closure/archive/08039ba8ca59f64248bb3b6ae016460fe9c9914f.tar.gz",
+		        "https://github.com/bazelbuild/rules_closure/archive/08039ba8ca59f64248bb3b6ae016460fe9c9914f.tar.gz",  # 2018-01-16
+		    ],
+		)
+
+		load("@io_bazel_rules_closure//closure:defs.bzl", "closure_repositories")
+
+		closure_repositories()
+
+		load("//tensorflow:workspace.bzl", "tf_workspace")
+
+		# Uncomment and update the paths in these entries to build the Android demo.
+		android_sdk_repository(
+		    name = "androidsdk",
+		    api_level = 23,
+		#    # Ensure that you have the build_tools_version below installed in the
+		#    # SDK manager as it updates periodically.
+		    build_tools_version = "26.0.1",
+		#    # Replace with path to Android SDK on your system
+		    path = "/Users/yangyixie/Library/Android/sdk",
+		)
+		#
+		android_ndk_repository(
+		    name="androidndk",
+		    path="/Users/yangyixie/Library/Android/sdk/ndk-bundle",
+		#    # This needs to be 14 or higher to compile TensorFlow.
+		#    # Please specify API level to >= 21 to build for 64-bit
+		#    # archtectures or the Android NDK will automatically select biggest
+		#    # API level that it supports without notice.
+		#    # Note that the NDK version is not the API level.
+		    api_level=14,
+		)
+
+		# Please add all new TensorFlow dependencies in workspace.bzl.
+		tf_workspace()
+
+		new_http_archive(
+		    name = "inception_v1",
+		    build_file = "models.BUILD",
+		    sha256 = "7efe12a8363f09bc24d7b7a450304a15655a57a7751929b2c1593a71183bb105",
+		    urls = [
+		        "http://storage.googleapis.com/download.tensorflow.org/models/inception_v1.zip",
+		        "http://download.tensorflow.org/models/inception_v1.zip",
+		    ],
+		)
+
+		new_http_archive(
+		    name = "mobile_ssd",
+		    build_file = "models.BUILD",
+		    sha256 = "bddd81ea5c80a97adfac1c9f770e6f55cbafd7cce4d3bbe15fbeb041e6b8f3e8",
+		    urls = [
+		        "http://storage.googleapis.com/download.tensorflow.org/models/object_detection/ssd_mobilenet_v1_android_export.zip",
+		        "http://download.tensorflow.org/models/object_detection/ssd_mobilenet_v1_android_export.zip",
+		    ],
+		)
+
+		new_http_archive(
+		    name = "mobile_multibox",
+		    build_file = "models.BUILD",
+		    sha256 = "859edcddf84dddb974c36c36cfc1f74555148e9c9213dedacf1d6b613ad52b96",
+		    urls = [
+		        "http://storage.googleapis.com/download.tensorflow.org/models/mobile_multibox_v1a.zip",
+		        "http://download.tensorflow.org/models/mobile_multibox_v1a.zip",
+		    ],
+		)
+
+		new_http_archive(
+		    name = "stylize",
+		    build_file = "models.BUILD",
+		    sha256 = "3d374a730aef330424a356a8d4f04d8a54277c425e274ecb7d9c83aa912c6bfa",
+		    urls = [
+		        "http://storage.googleapis.com/download.tensorflow.org/models/stylize_v1.zip",
+		        "http://download.tensorflow.org/models/stylize_v1.zip",
+		    ],
+		)
+
+		new_http_archive(
+		    name = "speech_commands",
+		    build_file = "models.BUILD",
+		    sha256 = "c3ec4fea3158eb111f1d932336351edfe8bd515bb6e87aad4f25dbad0a600d0c",
+		    urls = [
+		        "http://storage.googleapis.com/download.tensorflow.org/models/speech_commands_v0.01.zip",
+		        "http://download.tensorflow.org/models/speech_commands_v0.01.zip",
+		    ],
+		)
+
+
+		http_archive：下载bazel文件，然后解压它，这个bazel 目录文件中必须包含BUILD文件。上面的http_archive中指明了要下载io_bazel_rules_closure文件，以及它的下载地址
+
+		new_http_archive: 下载文件，然后解压它，然后和其中包含的build_file一起创建bazel目录
+
+		load：从.bzl文件中加载一些内容，如上面从defs.bzl文件中加载内容
+
+		android_sdk_repository：构建Android app时使用，指定Android sdk目录
+
+		android_ndk_repository：构建Android app时使用，指定Android ndk目录
+
+
+
+9. tensorflow BUILD文件
+
+	# Description:
+	# TensorFlow is a computational framework, primarily for use in machine
+	# learning applications.
+
+	# 通用方法，定义的值会作用到下面的每个子rule中。default_visibility指定了这个包的默认可见规则。可见的情况下才能被其他package调用。
+	package(
+	    default_visibility = ["//visibility:public"],
+	)
+
+	# 默认的license
+	licenses(["notice"])  # Apache 2.0
+
+	# 通用方法，加载.bzl文件
+	load(
+	    "//tensorflow:tensorflow.bzl",
+	    "tf_cc_test",
+	    "tf_cc_binary",
+	    "tf_copts",
+	    "tf_gen_op_wrappers_cc",
+	    "cc_library_with_android_deps",
+	)
+
+	# c++库文件，name指定了编译为库文件后的文件名，srcs和hdrs指定源文件和头文件，deps指定需要依赖的其他文件
+	cc_library(
+	    name = "gradient_checker",
+	    srcs = ["framework/gradient_checker.cc"],
+	    hdrs = ["framework/gradient_checker.h"],
+	    deps = [
+	        ":cc_ops",
+	        ":client_session",
+	        ":gradients",
+	        ":ops",
+	        ":scope",
+	        "//tensorflow/core:framework",
+	        "//tensorflow/core:lib",
+	        "//tensorflow/core:lib_internal",
+	    ],
+	)
+
+	# c++测试文件
+	tf_cc_test(
+	    name = "gradients_array_grad_test",
+	    srcs = ["gradients/array_grad_test.cc"],
+	    deps = [
+	        ":array_grad",
+	        ":cc_ops",
+	        ":cc_ops_internal",
+	        ":grad_op_registry",
+	        ":grad_testutil",
+	        ":gradient_checker",
+	        ":testutil",
+	        "//tensorflow/core:test",
+	        "//tensorflow/core:test_main",
+	        "//tensorflow/core:testlib",
+	    ],
+	)
+
+	# c++编译目标文件，为一个二进制可执行文件。name必须唯一，srcs指定了源文件，linkopts指定了链接规则，deps指定了依赖文件
+	tf_cc_binary(
+	    name = "tutorials_example_trainer",
+	    srcs = ["tutorials/example_trainer.cc"],
+	    copts = tf_copts(),
+	    linkopts = select({
+	        "//tensorflow:windows": [],
+	        "//tensorflow:windows_msvc": [],
+	        "//tensorflow:darwin": [
+	            "-lm",
+	            "-lpthread",
+	        ],
+	        "//tensorflow:ios": [
+	            "-lm",
+	            "-lpthread",
+	        ],
+	        "//conditions:default": [
+	            "-lm",
+	            "-lpthread",
+	            "-lrt",
+	        ],
+	    }),
+	    deps = [
+	        ":cc_ops",
+	        "//tensorflow/core:core_cpu",
+	        "//tensorflow/core:framework",
+	        "//tensorflow/core:lib",
+	        "//tensorflow/core:protos_all_cc",
+	        "//tensorflow/core:tensorflow",
+	    ],
+	)
+
+	# 为多个编译目标target指定一个名字，glob是一个帮助函数，指定了目录中哪些文件会include，哪些会exclude。visibility指定了target的可见性，也就是可以被哪些package调用
+	filegroup(
+	    name = "all_files",
+	    srcs = glob(
+	        ["**/*"],
+	        exclude = [
+	            "**/METADATA",
+	            "**/OWNERS",
+	        ],
+	    ),
+	    visibility = ["//tensorflow:__subpackages__"],
+	)
+
+  	BUILD文件也是采用的类似Python的语法，它定义了编译规则，lib依赖等各项规则。其中有些命令专属于BUILD文件，有些则是bazel语法通用的，如WORKSPACE文件中也可以使用。主要方法调用如下
+
+	tf_cc_binary：目标文件编译规则，为一个二进制可执行文件。name必须唯一，srcs指定了源文件，linkopts指定了链接规则，deps指定了依赖文件
+
+	cc_library：库文件编译规则，name指定了编译为库文件后的文件名，srcs和hdrs指定源文件和头文件，deps指定需要依赖的其他文件
+
+	tf_cc_test：测试文件规则
+
+	package：通用方法，定义的值会作用到下面的每个子rule中。default_visibility指定了这个包的默认可见规则。可见的情况下才能被其他package调用。
+
+	licenses：通用方法，默认的license
+
+	load：通用方法，加载.bzl文件
+
+	filegroup：通用方法，为多个编译目标target指定一个名字，glob是一个帮助函数，指定了目录中哪些文件会include，哪些会exclude。visibility指定了target的可见性，也就是可以被哪些package调用
