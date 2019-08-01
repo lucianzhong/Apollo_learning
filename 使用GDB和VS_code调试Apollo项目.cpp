@@ -1,4 +1,37 @@
  
+
+7.  Cyber_monitor
+ 
+		 1.start Dreamview
+		 2.Dreamview->Module Controller -> Open Routing && Planning
+		 3.Choose map
+		 4.source /apollo/scripts/apolo_base.sh
+		 5.Cyber_monitor
+
+
+
+8. gdb debug
+
+   1. ps aux | grep mainboard | grep planning
+
+
+    root   432  5.4  0.7 4922856 233576 pts/20 Sl   06:12   0:20 mainboard -d /apollo/modules/planning/dag/planning.dag -p planning -s CYBER_DEFAULT
+
+
+	2. sudo gdb -q bazel-bin/cyber/mainboard -p 432
+
+
+	3. (gdb) b modules/planning/on_lane_planning.cc:374
+
+	Breakpoint 1 at 0x7f3754207cb7: file modules/planning/on_lane_planning.cc, line 374.
+
+	4. c : 运行到断点
+
+    //因为Apollo 3.5以上版本通过动态创建的方式启动Planning模块，因此在使用GDB设置断点时，按下TAB键不会有提示，可以借助VSCode提供的Copy Relative Path功能撰写正确的源代码文件路径
+
+
+
+
  1. 在Docker内部编译Apollo项目
 	使用GDB调试Apollo项目必须带有调试符号信息，因此编译Apollo项目时，不能使用opt选项，可根据实际需求使用如下两个编译命令中任意一个进行构建：
 
@@ -131,3 +164,24 @@ q	退出GDB调试	q	退出GDB调试，与Ctrl+d作用相同。注意：如果使
 	sudo chown "$USER":"$USER" /home/"$USER"/.docker -R
 
 	sudo chmod g+rwx "/home/$USER/.docker" -R
+
+
+
+6. 
+
+ ps -ef |grep planning
+
+
+ root     26071     1  1 04:01 pts/22   00:00:00 /usr/bin/python /apollo/cyber/t
+ools/cyber_launch/cyber_launch start /apollo/modules/planning/launch/planning.l
+aunch
+root     26095 26071  6 04:01 pts/22   00:00:02 mainboard -d /apollo/modules/pl
+anning/dag/planning.dag -p planning -s CYBER_DEFAULT
+root     26370 25732  0 04:02 pts/21   00:00:00 grep --color=auto planning
+
+
+ gdb attach 26071
+
+
+
+ 

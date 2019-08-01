@@ -68,10 +68,21 @@ The implementation of the demo mainly includes the following steps.
 
 
 
+6. Apollo Cyber RT框架基于组件的概念构建、加载各功能模块。Localization、 Perception、Prediction、Planning、Control等功能模块均作为Apollo Cyber RT框架的一个组件而存在，基于Cyber RT提供的调度程序mainboard加载运行。
+	基于Apollo Cyber RT框架创建和发布新的功能模块组件，需执行以下五个基本步骤：
+																		1. 设置组件文件结构
+																		2. 实现组件类
+																		3. 提供构建文件
+																		4. 提供配置文件
+																		5. 启动组件
 
 
 
-
-
-
+		1. 设置组件文件结构
+			基于路径${APOLLO_HOME}/modules/planning（${APOLLO_HOME}表示Apollo项目的根目
+																						头文件: planning_component.h
+																						实现文件: planning_component.cc
+																						构建文件: BUILD；
+																						DAG配置文件: dag/planning.dag
+																						Launch配置文件: launch/planning.launch
 
