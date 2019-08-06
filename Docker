@@ -1,4 +1,4 @@
-docker ps
+cker ps
 
 docker exec -it  bash
 
@@ -84,8 +84,9 @@ root@b8573233d675:/#
 	
 
 
-13. 
+13.   从容器拷贝文件到宿主机: zy@zy:~$ docker cp 1c10ae5c477792224b18ff8b218a39e4475948324afdc6d4622afb83ad46c07e:/apollo/CyberBridge /home/zy/Desktop
 
+      从宿主机拷贝文件到容器: docker cp /opt/test/file.txt mycontainer：/opt/testnew/
 
 
 

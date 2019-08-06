@@ -1157,3 +1157,7 @@ https://paul.pub/apollo-routing/
 
 	上述的过程总结一下就是，首先读取routing_map并初始化Navigator类，接着遍历routing_request，因为routing_request请求为一个个的点，所以先查看routing_request的点是否在路上，不在路上则找到最近的路，并且补充信息（不在路上的点则过不去），
 	最后调用"navigator_ptr_->SearchRoute"返回routing响应。
+
+
+
+22. Navigator类
