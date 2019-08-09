@@ -43,3 +43,9 @@ sudo docker pull busybox
 
 
 sudo docker inspect be99
+
+
+////////////////////////////
+
+ 2100  sudo docker run -d apolloauto/apollo:paddlepaddle_volume-x86_64-latest 
+ 2101  docker inspect ccbe

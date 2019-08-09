@@ -99,6 +99,59 @@ need to mount the volume: paddlepaddle_volume-x86_64-1.0.0
 
 
 
+5.  // How to Run Perception Module on Your Local Computer
+
+  Build Apollo:  ./apollo.sh build_opt_gpu
+
+  查看显卡名称以及驱动版本:  nvidia-smi
+
+
+  // install nvidia-docker  // https://www.jianshu.com/p/f25ccedb996e   //https://www.dongliwu.com/archives/61/
+  # If you have nvidia-docker 1.0 installed: we need to remove it and all existing GPU containers
+  docker volume ls -q -f driver=nvidia-docker | xargs -r -I{} -n1 docker ps -q -a -f volume={} | xargs -r docker rm -f
+  sudo apt-get purge -y nvidia-docker
+
+  # Add the package repositories
+  curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey |  sudo apt-key add -  distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
+  curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list |     sudo tee /etc/apt/sources.list.d/nvidia-docker.list
+  sudo apt-get update
+
+  # Install nvidia-docker2 and reload the Docker daemon configuration
+  sudo apt-get install -y nvidia-docker2
+  sudo pkill -SIGHUP dockerd
+
+  # Test nvidia-smi with the latest official CUDA image
+  docker run --runtime=nvidia --rm nvidia/cuda:9.0-base nvidia-smi
+
+
+  // 配置daemon的默认运行时
+  在安装完成nvidia-docker2之后，nvidia-docker2已经默认在/etc/docker/daemon.json文件中写入了以下内容：
+
+  {
+      "default-runtime": "nvidia",
+      "runtimes": {
+          "nvidia": {
+              "path": "/usr/bin/nvidia-container-runtime",
+              "runtimeArgs": [],
+              "registry-mirrors": ["https://gemfield.mirror.aliyuncs.com"]
+          }
+      }
+  }
+  我们所做的工作其实就是在第一行加上了"default-runtime": "nvidia",
+
+
+  重启docker服务: sudo systemctl restart docker
+
+  再次检查状态: systemctl status docker
+
+
+
+
+
+
+
+
+
 5. 
 protobuffer:
 

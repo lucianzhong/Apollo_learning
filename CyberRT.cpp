@@ -1,5 +1,89 @@
 CyberRT:
 
+1. cyber_channel list
+
+	The number of channels is:  25
+	/apollo/canbus/chassis
+	/apollo/control
+	/apollo/control/pad
+	/apollo/drive_event
+	/apollo/hmi/audio_capture
+	/apollo/hmi/status
+	/apollo/localization/msf_status
+	/apollo/localization/pose
+	/apollo/monitor
+	/apollo/monitor/system_status
+	/apollo/navigation
+	/apollo/perception/obstacles
+	/apollo/perception/traffic_light
+	/apollo/planning
+	/apollo/prediction
+	/apollo/relative_map
+	/apollo/routing_request
+	/apollo/routing_response
+	/apollo/sensor/camera/front_6mm/image
+	/apollo/sensor/camera/front_6mm/image/compressed
+	/apollo/sensor/gnss/corrected_imu
+	/apollo/sensor/gnss/ins_stat
+	/apollo/sensor/gnss/odometry
+	/apollo/sensor/lidar128/compensator/PointCloud2
+	/tf
+
+
+2. cyber_monitor
+	
+	It automatically collects the information of all the channels through the topology and displays them in two columns (channel name, channel data type).
+	The default display for channel information is in red. However, if there is data flowing through the a channel, the corresponding line of the channel is displayed in green
+
+
+
+3.  dag files are 
+
+    planning.dag
+	
+	# Define all coms in DAG streaming.
+	module_config {
+	  module_library : "/apollo/bazel-bin/modules/planning/libplanning_component.so"
+	  components {
+	    class_name : "PlanningComponent"
+	    config {
+	      name: "planning"
+	      flag_file_path:  "/apollo/modules/planning/conf/planning.conf"
+	      readers: [  //readers
+	        {
+	          channel: "/apollo/prediction"
+	        },
+	        {
+	          channel: "/apollo/canbus/chassis"
+	          qos_profile: {
+	              depth : 15
+	          }
+	          pending_queue_size: 50
+	        },
+	        {
+	          channel: "/apollo/localization/pose"
+	          qos_profile: {
+	              depth : 15
+	          }
+	          pending_queue_size: 50
+	        }
+	      ]
+	    }
+	  }
+}
+
+// the CyberBridge files are used to read and write these channels
+
+
+
+
+
+
+
+
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 1. Talker-Listener
 The first part of demonstrating CyberRT API is to understand the Talker/Listener example. 
 Following are three essential concepts: node (basic unit), reader(facility to read message) and writer(facility to write message) of the example.

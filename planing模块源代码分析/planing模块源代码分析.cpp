@@ -769,6 +769,11 @@ PublicRoadPlanner::Plan函数内:首先调用函数 ScenarioManager:Update 根�
 26. pnc_map
 	pnc全称是Planning And Control。这是Planning用来对接Routing搜索结果的子模块
 
+	 modules/common/proto/geometry.proto  //PointENU：描述了地图上的一个点
+	 modules/common/proto/pnc_point.proto //SLPoint：描述了Frenet坐标系上的一个点。s表示距离起点的纵向距离，l表示距离中心线的侧向距离
+	 modules/map/pnc_map/path.h      // LaneWaypoint：描述了车道上的点
+	 modules/common/vehicle_state/proto/vehicle_state.proto    //VehicleState：描述车辆状态，包含了自车位置，姿态，方向，速度，加速度等信息
+
 	
 	RouteSegments:
 	我们回顾一下，Routing的搜索结果RoutingResponse中包含了下面三个层次的结构：
@@ -779,8 +784,9 @@ PublicRoadPlanner::Plan函数内:首先调用函数 ScenarioManager:Update 根�
 		
 	而pnc_map模块中的RouteSegments对应了上面的Passage结构，它其中会包含若干个车道信息。这个类继承自std::vector<LaneSegment>
 
-	RouteSegments中有如下一些方法值得关注：
 
+
+	RouteSegments中有如下一些方法值得关注：
 	NextAction()：车辆接下来要采取的动作。可能是直行，左变道，或者右变道。
 	CanExit()：当前通路是否可以接续到Routing结果的另外一个通路上。
 	GetProjection()：将一个点投影到当前通路上。返回SLPoint和LaneWaypoint。
@@ -790,17 +796,25 @@ PublicRoadPlanner::Plan函数内:首先调用函数 ScenarioManager:Update 根�
 	IsNeighborSegment()：当前RouteSegments是否是车辆的临近RouteSegments
 
 
+	PncMap类负责对接Routing搜索结果的更新
+	PncMap会根据车辆当前位置，提供车辆周边的RouteSegments信息供ReferenceLineProvider生成ReferenceLine。“车辆周边”与车辆的纵向和横向相关
+
+	对于纵向来说，PncMap返回的结果是前后一定范围内的。具体的范围由下面三个值决定：
+
+	modules/map/pnc_map/pnc_map.cc:
+
+	DEFINE_double(look_backward_distance, 30,"look backward this distance when creating reference line from routing"); //向后是30米的范围
+
+	DEFINE_double(look_forward_short_distance, 180,"short look forward this distance when creating reference line " "from routing when ADC is slow");//向前是根据车辆的速度返回180米或者250米的范围
+
+	DEFINE_double(look_forward_long_distance, 250,"look forward this distance when creating reference line from routing");
+
+	对于横向来说，如果Routing的搜索结果包含变道的信息。则PncMap提供的数据会包含自车所在车道和变道后的相关通路
 
 
-
-
-
-
-
-
-
-
-
+	/modules/map/pnc_map/pnc_map.c
+	PncMap中的下面这个方法用来接收车辆的状态更新。当然，这其中很重要的就是位置状态。
+	bool PncMap::UpdateVehicleState(const VehicleState &vehicle_state)
 
 
 
@@ -833,6 +847,8 @@ PublicRoadPlanner::Plan函数内:首先调用函数 ScenarioManager:Update 根�
 
 
 
+
+	  // reference_points_其实是从map_path_得到，具体见ReferenceLine的构造函数。所以这两个数据的作用其实是一样的。
 	  /modules/planning/reference_line/reference_line.cc:
 
 	  ReferenceLine::ReferenceLine(const MapPath& hdmap_path): map_path_(hdmap_path) {
@@ -845,7 +861,178 @@ PublicRoadPlanner::Plan函数内:首先调用函数 ScenarioManager:Update 根�
 	}
 
 
-	std::vector<ReferencePoint>是一系列的点，点包含了位置的信息。因此这些点就是生成车辆行驶轨迹的基础数据:
+28. std::vector<ReferencePoint>是一系列的点，点包含了位置的信息。因此这些点就是生成车辆行驶轨迹的基础数据:
+
+	ReferencePoint由MapPathPoint继承而来
+
+	/modules/common/math/vec2d.h:
+	Vec2d描述一个二维的点，包含的数据成员如下：
+	double x_：描述点的x坐标
+	double y_：描述点的y坐标
+
+
+	/modules/map/pnc_map/path.h
+	MapPathPoint描述了一个地图上的点，包含的数据成员如下：
+	double heading_：描述点的朝向。
+	std::vector<LaneWaypoint> lane_waypoints_：描述路径上的点。有些车道可能会存在重合的部分，所以地图上的一个点可能同时属于多个车道，因此这里的数据是一个vector结构
+
+
+	/modules/planning/reference_line/reference_point.h
+	ReferencePoint描述了参考线中的点，包含的数据成员如下：
+	double kappa_：描述曲线的曲率
+	double dkappa_：描述曲率的导数	
+
+
+	如果你打开Apollo项目中的demo地图文件你就会发现，地图中记录的仅仅是每个点x和y坐标，并没有记录heading和kappa数据。事实上，这些数据都是在读取地图原始点数据之后计算出来的.// /modules/map/data/demo/base_map.txt
+
+
+
+29. 创建ReferenceLine
+
+	在每一次计算循环中，Planning模块都会通过ReferenceLineProvider生成ReferenceLine。ReferenceLine由Routing的搜索结果决定。Routing是预先搜索出的全局可达路径，而ReferenceLine是车辆当前位置的前后一段范围
+	直行的情况下，ReferenceLine是一个。而在需要变道的时候，会有多个ReferenceLine
+
+	bool ReferenceLineProvider::CreateReferenceLine(
+	    std::list<ReferenceLine> *reference_lines,
+	    std::list<hdmap::RouteSegments> *segments) {
+	  CHECK_NOTNULL(reference_lines);
+	  CHECK_NOTNULL(segments);
+
+	  common::VehicleState vehicle_state;
+	  {
+	    std::lock_guard<std::mutex> lock(vehicle_state_mutex_);
+	    vehicle_state = vehicle_state_;
+	  }
+
+	  routing::RoutingResponse routing;
+	  {
+	    std::lock_guard<std::mutex> lock(routing_mutex_);
+	    routing = routing_;
+	  }
+	  bool is_new_routing = false;
+	  {
+	    // Update routing in pnc_map
+	    if (pnc_map_->IsNewRouting(routing)) {					// PncMap对接了Routing的搜索结果。如果Routing的路线变了，这里需要进行更新
+	      is_new_routing = true;
+	      if (!pnc_map_->UpdateRoutingResponse(routing)) { 	
+	        AERROR << "Failed to update routing in pnc map";
+	        return false;
+	      }
+	    }
+	  }
+
+	  if (!CreateRouteSegments(vehicle_state, segments)) {				// 车辆的位置一直会变动（vehicle_state中包含了这个信息）。如果Routing的结果需要变道，则segments将是多个，否则就是一个（直行的情况）
+	    AERROR << "Failed to create reference line from routing";		// CreateRouteSegments方法中会调用pnc_map_->GetRouteSegments(vehicle_state, segments)来获取车辆当前位置周边范围的RouteSegment
+	    	    return false;											// 如果Routing的结果需要变道，则segments将是多个，否则就是一个（直行的情况）
+	  }
+
+	  if (is_new_routing || !FLAGS_enable_reference_line_stitching) {
+	    for (auto iter = segments->begin(); iter != segments->end();) {
+	      reference_lines->emplace_back();
+	      if (!SmoothRouteSegment(*iter, &reference_lines->back())) {
+	        AERROR << "Failed to create reference line from route segments";
+	        reference_lines->pop_back();
+	        iter = segments->erase(iter);
+	      } else {
+	        ++iter;
+	      }
+	    }
+	    return true;
+	  } else {  // stitching reference line
+	    for (auto iter = segments->begin(); iter != segments->end();) {
+	      reference_lines->emplace_back();
+	      if (!ExtendReferenceLine(vehicle_state, &(*iter), &reference_lines->back())) { // 大部分情况下，在车辆行驶过程中，会不停的根据车辆的位置对ReferenceLine进行长度延伸。ReferenceLine的长度是200多米的范围（往后30米左右，往前180米或者250米左右）
+	        AERROR << "Failed to extend reference line";
+	        reference_lines->pop_back();
+	        iter = segments->erase(iter);
+	      } else {
+	        ++iter;
+	      }
+	    }
+	  }
+	  return true;
+	}
+
+
+	在车辆行驶过程中，必不可少的就是判断自车以及障碍物所处的位置。这就很自然的需要将物体投影到参考线上来进行计算
+
+	ReferencePoint GetReferencePoint(const double s) const;
+	common::FrenetFramePoint GetFrenetPoint(
+	  const common::PathPoint& path_point) const;
+	std::vector<ReferencePoint> GetReferencePoints(double start_s,
+	                                             double end_s) const;
+	size_t GetNearestReferenceIndex(const double s) const;
+	ReferencePoint GetNearestReferencePoint(const common::math::Vec2d& xy) const;
+	std::vector<hdmap::LaneSegment> GetLaneSegments(const double start_s,
+	                                              const double end_s) const;
+	ReferencePoint GetNearestReferencePoint(const double s) const;
+	ReferencePoint GetReferencePoint(const double x, const double y) const;
+	bool GetApproximateSLBoundary(const common::math::Box2d& box,
+	                            const double start_s, const double end_s,
+	                            SLBoundary* const sl_boundary) const;
+	bool GetSLBoundary(const common::math::Box2d& box,
+	                 SLBoundary* const sl_boundary) const;
+	bool GetSLBoundary(const hdmap::Polygon& polygon,
+	                 SLBoundary* const sl_boundary) const;
+
+
+
+30.  ReferenceLineSmoother
+	直接通过RouteSegments生成的ReferenceLine可能是不平滑的。	如果直接让车辆沿着不平滑的路线行驶可能造成车辆方向的抖动或者大幅变化，这对乘坐体验来说非常不好。因此，原始的路线数据需要经过算法的平滑。
+
+
+	modules/planning/reference_line/reference_line_provider.cc
+
+	bool ReferenceLineProvider::SmoothReferenceLine( const ReferenceLine &raw_reference_line, ReferenceLine *reference_line) {
+	  if (!FLAGS_enable_smooth_reference_line) {
+	    *reference_line = raw_reference_line;
+	    return true;
+	  }
+	  // generate anchor points:
+	  std::vector<AnchorPoint> anchor_points;
+	  GetAnchorPoints(raw_reference_line, &anchor_points);
+	  smoother_->SetAnchorPoints(anchor_points);
+	  if (!smoother_->Smooth(raw_reference_line, reference_line)) {			// smoother_->Smooth才是平滑算法的实现
+	    AERROR << "Failed to smooth reference line with anchor points";
+	    return false;
+	  }
+	  if (!IsReferenceLineSmoothValid(raw_reference_line, *reference_line)) {
+	    AERROR << "The smoothed reference line error is too large";
+	    return false;
+	  }
+	  return true;
+	}
+
+	目前Apollo的Planning模块中内置了三个ReferenceLine平滑器,具体使用哪一个平滑器由ReferenceLineProvider在初始化的时候读取配置文件来决定
+
+	CHECK(common::util::GetProtoFromFile(FLAGS_smoother_config_filename, &smoother_config_))
+
+	modules/planning/conf/qp_spline_smoother_config.pb.txt //使用的是QpSplineReferenceLineSmoother
+
+	modules/planning/common/planning_gflags.cc
+	DEFINE_string(smoother_config_filename, "/apollo/modules/planning/conf/qp_spline_smoother_config.pb.txt", "The configuration file for qp_spline smoother");
+
+
+	ReferenceLineSmoother算法:参考线平滑器使用了二次规划（Quadratic programming ）和样条插值（Spline interpolation）算法
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

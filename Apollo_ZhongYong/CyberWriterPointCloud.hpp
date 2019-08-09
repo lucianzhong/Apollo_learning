@@ -5,6 +5,8 @@
 #pragma once
 #include <memory>
 
+class Imp;
+
 class CyberWriterPointCloud
 {
   public:
