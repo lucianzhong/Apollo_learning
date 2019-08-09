@@ -1,3 +1,4 @@
+ls
 1. rancher									// ubuntu & window need different environment for each other in rancher
 	cybertron2.0 environment
 		apollo: 5.0
