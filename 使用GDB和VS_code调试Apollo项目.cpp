@@ -12,7 +12,7 @@
 
 8. gdb debug
 
-   1. ps aux | grep mainboard | grep planning
+    1. ps aux | grep mainboard | grep planning
 
 
     root   432  5.4  0.7 4922856 233576 pts/20 Sl   06:12   0:20 mainboard -d /apollo/modules/planning/dag/planning.dag -p planning -s CYBER_DEFAULT
