@@ -228,7 +228,10 @@ info proc显示当前程序可执行文件相关信息（name，pwd）
 	nvidia-smi
 
 
-2. In docker:
+2. 
+
+
+	2.1 In docker:
 
 	# 启动并进入Docker
 	bash docker/scripts/dev_start.sh -C
@@ -245,8 +248,54 @@ info proc显示当前程序可执行文件相关信息（name，pwd）
 
 
 
- cyber_launch start /apollo/modules/perception/production/launch/perception.launch
 
 
 
- zy@in_dev_docker:/apollo$ sudo cp -r  /apollo/modules/perception/production/data/perception/camera/params  /apollo/modules/perception/production/data/perception/camera/params/
+		2.2 
+			obs_sensor_intrinsic_path=/apollo/modules/perception/data/params
+			mkdir /apollo/modules/perception/data/params/
+
+		 zy@in_dev_docker:/apollo$ sudo cp -r  /apollo/modules/perception/production/data/perception/camera/params/.  /apollo/modules/perception/data/params/
+
+
+
+		2.3  
+				[perception]  [NVBLAS] NVBLAS_CONFIG_FILE environment variable is NOT set : relying on default config filename 'nvblas.conf'
+				[perception]  [NVBLAS] Cannot open default config file 'nvblas.conf'
+				[perception]  [NVBLAS] Config parsed
+				[perception]  [NVBLAS] CPU Blas library need to be provided
+
+				export NVBLAS_CONFIG_FILE=/usr/local/cuda
+
+				export NVBLAS_CONFIG_FILE=/usr/local/cuda/nvblas.conf
+
+				zy@in_dev_docker:/usr/local/cuda$ sudo touch nvblas.conf
+
+
+				zy@in_dev_docker:/usr/local/cuda$ vim nvblas.conf   // put_in: NVBLAS_CPU_BLAS_LIB  /usr/lib/libopenblas.so 
+
+
+
+		2.4   docker commit -p a45572938fcd registry.docker-cn.com/apolloauto/apollo:lucianzhong_dev_with_peception
+
+
+
+
+		2.5 
+		 cyber_launch start /apollo/modules/perception/production/launch/perception.launch
+
+
+
+		mainboard -d /apollo/modules/perception/production/dag/dag_streaming_perception.dag
+
+
+		 mainboard -d /apollo/modules/perception/production/dag/dag_streaming_perception_camera.dag -p perception -s CYBER_DEFAUL
+
+
+
+
+		 // cuda is linked to cuda8.0
+		 ls /usr/local/cuda
+         
+         nvcc -V
+
