@@ -220,8 +220,30 @@ info proc显示当前程序可执行文件相关信息（name，pwd）
 
 
 /////////////////////////////////
+// how to launch the perception module
+	reference:
+	https://github.com/ApolloAuto/apollo/blob/master/docs/howto/how_to_run_perception_module_on_your_local_computer.md
 
 1. in Ubuntu need to intsall nvidia driver
+					// 由于官方推荐安装NVIDIA-375版本的驱动  Apollo3.5   // 因为apollo镜像仅支持cuda8.0，不能使用太新版本的驱动程序
+
+	// 首先看看自己Ubuntu内核支持到哪个版本的驱动
+	sudo apt-cache search nvidia*
+
+	// 如果安装的是官网下载的驱动,则重新运行run文件来卸载
+    sh ./nvidia.run --uninstall
+
+   // 卸载已存在驱动版本(可选)
+sudo apt-get remove --purge nvidia*
+
+
+					Installing NVIDIA GPU Driver
+			The Apollo runtime in the vehicle requires the NVIDIA GPU Driver. You must install the NVIDIA GPU driver with specific options.
+
+			Download the installation files
+			wget http://us.download.nvidia.com/XFree86/Linux-x86_64/375.39/NVIDIA-Linux-x86_64-375.39.run
+			Start the driver installation
+			sudo bash ./NVIDIA-Linux-x86_64-375.39.run --no-x-check -a -s --no-kernel-module
 
 
 
@@ -229,9 +251,21 @@ info proc显示当前程序可执行文件相关信息（name，pwd）
 
 
 2. 
+	# 查看Docker当前驱动，没装过应该是没有
+	sudo dpkg --list | grep nvidia-*
+	# 如果已经安装过，并且与主机不符，需要先卸载老版本
+	sudo apt-get remove nvidia-xxx
+
+3.  In docker:
 
 
-	2.1 In docker:
+
+		主机端：
+		cd apollo#主机到阿波罗的根目录
+		sudo bash docker/scripts/dev_start.sh -l -t tag_name#(对应之前commit的tag名称)
+		sudo bash docker/scripts/dev_into.sh
+
+
 
 	# 启动并进入Docker
 	bash docker/scripts/dev_start.sh -C
@@ -247,11 +281,77 @@ info proc显示当前程序可执行文件相关信息（name，pwd）
 	nvidia-smi
 
 
+ // cuda is linked to cuda8.0
+
+		sudo ./cuda_10.1.168_418.67_linux.run 
+
+	Please make sure that
+ -   PATH includes /usr/local/cuda-10.1/bin
+ -   LD_LIBRARY_PATH includes /usr/local/cuda-10.1/lib64, or, add /usr/local/cuda-10.1/lib64 to /etc/ld.so.conf and run ldconfig as root
+
+
+		 //配置到环境变量（不同环境下，配置不同环境变量，可以使用多个cuda版本）
+		sudo gedit ~/.bashrc
+		打开文件后在文件末尾添加路径，也就是安装目录，命令如下：
+
+		export PATH=/usr/local/cuda-10.0/bin:$PATH
+		export LD_LIBRARY_PATH=/usr/local/cuda-10.0/lib64:$LD_LIBRARY_PATH　
+
+      export CUDA_HOME=$CUDA_HOME:/usr/local/cuda-10.0
+		
+		source ~/.bashrc
+
+
+sudo rm -rf cuda
+sudo ln -s /usr/local/cuda-8.0/ /usr/local/cuda
+		
+
+
+		 ls /usr/local/cuda
+         
+         nvcc -V
+
+///////////////////////////////////
+//cudnn
+
+
+         //.  the cuDNN library installation path is /usr/lib/x86_64-linux-gnu/
+         依照自己先前下載CUDA的版本，選擇配合的cuDNN版本，將三個deb檔案都下載下來，分別再執行
+
+$ sudo dpkg -i libcudnn7_7.1.4.18-1+cuda8.0_amd64.deb
+
+$ sudo dpkg -i libcudnn7-dev_7.1.4.18-1+cuda8.0_amd64.deb
+
+$ sudo dpkg -i libcudnn7-doc_7.1.4.18-1+cuda8.0_amd64.deb
 
 
 
 
-		2.2 
+         docker cp /home/zy/Downloads/libcudnn7-dev_7.1.4.18-1+cuda8.0_amd64.deb b7544a6273e0:/apollo
+docker cp /home/zy/Downloads/libcudnn7_7.1.4.18-1+cuda8.0_amd64.deb  b7544a6273e0:/apollo
+
+
+         	# test cuda and cudnn
+cuda-install-samples-8.0.sh ~
+		cd ~/NVIDIA_CUDA-8.0_Samples/0_Simple/cdpSimplePrint
+		make
+		./cdpSimplePrint
+
+  4.  
+  // build apollo with gpu
+  ./apollo.sh build_gpu    
+
+
+  		// without debug information	
+        ./apollo.sh build_opt_gpu   
+
+         ERROR: (08-14 00:21:08.409) /apollo/modules/perception/base/BUILD:127:1: Linking of rule '//modules/perception/base:common_test' failed (Exit 1).
+		/usr/bin/ld: cannot find -lnppi
+		/usr/bin/ld: cannot find -lnppi
+
+
+
+	5.
 			obs_sensor_intrinsic_path=/apollo/modules/perception/data/params
 			mkdir /apollo/modules/perception/data/params/
 
@@ -259,7 +359,7 @@ info proc显示当前程序可执行文件相关信息（name，pwd）
 
 
 
-		2.3  
+6.
 				[perception]  [NVBLAS] NVBLAS_CONFIG_FILE environment variable is NOT set : relying on default config filename 'nvblas.conf'
 				[perception]  [NVBLAS] Cannot open default config file 'nvblas.conf'
 				[perception]  [NVBLAS] Config parsed
@@ -276,12 +376,16 @@ info proc显示当前程序可执行文件相关信息（name，pwd）
 
 
 
-		2.4   docker commit -p a45572938fcd registry.docker-cn.com/apolloauto/apollo:lucianzhong_dev_with_peception
+		7.  docker commit container_id apolloauto/apollo:tag_name
+			#container_id用docker ps -l查看, tag_name自己取名字。该命令用于将已基于源镜像更改的内容保存成新的镜像
 
 
 
 
-		2.5 
+		8.
+
+		source scripts/apollo_base.sh 
+
 		 cyber_launch start /apollo/modules/perception/production/launch/perception.launch
 
 
@@ -294,8 +398,20 @@ info proc显示当前程序可执行文件相关信息（name，pwd）
 
 
 
-		 // cuda is linked to cuda8.0
-		 ls /usr/local/cuda
-         
-         nvcc -V
 
+	9.   
+
+
+		gdb -q /apollo/bazel-bin/cyber/mainboard  /apollo/data/core/core_mainboard.16227
+
+
+
+		
+
+		core_mainboard.25475
+
+
+		#0  0x00007fb3be0f8280 in apollo::perception::inference::RTNet::Init (this=0x20c2e00, shapes=...)
+		    at modules/perception/inference/tensorrt/rt_net.cc:634
+		634	  context_ = engine->createExecutionContext();
+nv
