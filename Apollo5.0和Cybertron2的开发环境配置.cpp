@@ -10,7 +10,8 @@
 
 2. update ubuntu16 docker on rancher
 	volume
-		apollo5_cache-data_20e43:/root/.cache   // Add Volume
+		apollo5_cache-data_20e43:/root/.cache   // Add Volume   // In apollo5-apollo-ubuntu14-1,  volume: apollo5_cache-data_20e43 	/root/.cache, add to ubuntu16, upgrade add volume: apollo5_cache-data_20e43 	/root/.cache
+
 		use name: root
 
 3. Need to download Cybertron2 manually   // git config --global credential.helper store   // repeatedly inputs of password
@@ -125,4 +126,42 @@ lrwxrwxrwx  1 root root       62 Aug  7 08:59 CybertronBridgeApollo -> /Cybertro
 
 4. // log files
 
+	// apollo/cyber/logger/log_file_object.cc
+	apollo_publish_obstacles.INFO  
+	bridge.INFO
+
+ 	apollo::cyber::Init("apollo_publish_obstacles");
+ 
+
+// the Cybertron2 log files are in the log folder
+   apollo/CyberBridge/CyberWriterObstacles.cpp
 	root@apollo5-apollo-ubuntu14-1:/Cybertron2/Samples/5_DemoSceneSingleUeEditor/log#
+	CybertronDaemon_ApolloBridge
+	CybertronBridgeApolloCyber
+
+
+
+
+5. 
+// cyber_recorder
+
+// 录制
+root@apollo5-apollo-ubuntu14-1:/apollo# cyber_recorder record -a
+// 查看录制信息
+root@apollo5-apollo-ubuntu14-1:/apollo# cyber_recorder info 20190819115806.record.00002  
+
+// 回放和暂停
+root@apollo5-apollo-ubuntu14-1:/apollo# cyber_recorder play -f 20190819115806.record.00002
+
+
+// 查看channel
+root@apollo5-apollo-ubuntu14-1:/apollo# cyber_channel list
+
+// 查看channel的内容
+cyber_channel echo /apollo/planning
+cyber_channel echo /apollo/perception/obstacles
+
+
+// 回放和暂停
+root@apollo5-apollo-ubuntu14-1:/apollo# cyber_recorder play -f 20190819115806.record.00002
+

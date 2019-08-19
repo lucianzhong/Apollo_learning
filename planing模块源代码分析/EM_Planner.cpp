@@ -862,3 +862,134 @@ OUT_OF_LANE：超出车道
 4. 速度规划器(动态规划)--DpStSpeedOptimizer
 在路径规划中，已经给出了一条从规划起始点到规划终点开销cost最小的路径，如下图的蓝色星星组成的路径，每个蓝色的路径点都有相对于参考线的累计距离s和侧方相对距离l。
 那么剩下最后一个问题：每个规划点的速度怎么设定？换句话说无人车应该在什么时间点到达轨迹点？这就需要考虑障碍物在每个时间间隔的位置。
+
+ apollo/modules/planning/planner/em/em_planner.cc
+
+
+
+Status EMPlanner::Plan( const TrajectoryPoint& planning_start_point, Frame* frame) {
+  bool has_drivable_reference_line = false;
+  bool disable_low_priority_path = false;
+  auto status = Status(ErrorCode::PLANNING_ERROR, "reference line not drivable");
+  for (auto& reference_line_info : frame->reference_line_info()) {		//// 先分别对每条参考线进行规划
+    if (disable_low_priority_path) {
+      reference_line_info.SetDrivable(false);
+    }
+    if (!reference_line_info.IsDrivable()) {
+      continue;
+    }
+    auto cur_status =  PlanOnReferenceLine(planning_start_point, frame, &reference_line_info);   // 规划主函数
+    if (cur_status.ok() && reference_line_info.IsDrivable()) {
+      has_drivable_reference_line = true;
+      if (FLAGS_prioritize_change_lane &&
+          reference_line_info.IsChangeLanePath() &&
+          reference_line_info.Cost() < kStraightForwardLineCost) {
+        disable_low_priority_path = true;
+      }
+    } else {
+      reference_line_info.SetDrivable(false);
+    }
+  }
+  return has_drivable_reference_line ? Status::OK() : status;
+}
+
+
+
+
+Status EMPlanner::PlanOnReferenceLine( const TrajectoryPoint& planning_start_point, Frame* frame,  ReferenceLineInfo* reference_line_info) {
+  if (!reference_line_info->IsChangeLanePath()) {
+    reference_line_info->AddCost(kStraightForwardLineCost);
+  }
+  ADEBUG << "planning start point:" << planning_start_point.DebugString();
+  auto* heuristic_speed_data = reference_line_info->mutable_speed_data();
+  auto speed_profile =
+      GenerateInitSpeedProfile(planning_start_point, reference_line_info);
+  if (speed_profile.empty()) {
+    speed_profile = GenerateSpeedHotStart(planning_start_point);
+    ADEBUG << "Using dummy hot start for speed vector";
+  }
+  heuristic_speed_data->set_speed_vector(speed_profile);
+
+  auto ret = Status::OK();
+
+  for (auto& optimizer : tasks_) {		  // 对每条参考线分别进行所有任务的规划，包括速度规划、路径位置规划、位置决策器规划等。
+    const double start_timestamp = Clock::NowInSeconds(); 
+    ret = optimizer->Execute(frame, reference_line_info);
+    if (!ret.ok()) {
+      AERROR << "Failed to run tasks[" << optimizer->Name()
+             << "], Error message: " << ret.error_message();
+      break;
+    }
+
+
+
+    modules/planning/tasks/path_optimizer.h
+
+    apollo::common::Status SpeedOptimizer::Execute( Frame* frame, ReferenceLineInfo* reference_line_info) {
+		  Task::Execute(frame, reference_line_info);
+
+		  auto ret = Process(		// 最终会调用速度规划类的Process函数
+		      reference_line_info->AdcSlBoundary(), reference_line_info->path_data(),
+		      frame->PlanningStartPoint(), reference_line_info->reference_line(),
+		      *reference_line_info->mutable_speed_data(),
+		      reference_line_info->path_decision(),
+		      reference_line_info->mutable_speed_data());
+
+		  RecordDebugInfo(reference_line_info->speed_data());
+		  return ret;
+		}
+
+
+
+modules/planning/tasks/dp_st_speed/dp_st_speed_optimizer.cc
+
+Status DpStSpeedOptimizer::Process(const SLBoundary& adc_sl_boundary,
+                                   const PathData& path_data,
+                                   const TrajectoryPoint& init_point,
+                                   const ReferenceLine& reference_line,
+                                   const SpeedData& reference_speed_data,
+                                   PathDecision* const path_decision,
+                                   SpeedData* const speed_data) {
+		  if (!is_init_) {
+		    AERROR << "Please call Init() before process DpStSpeedOptimizer.";
+		    return Status(ErrorCode::PLANNING_ERROR, "Not inited.");
+		  }
+		  init_point_ = init_point;
+		  adc_sl_boundary_ = adc_sl_boundary;
+		  reference_line_ = &reference_line;
+
+		  if (path_data.discretized_path().NumOfPoints() == 0) {
+		    std::string msg("Empty path data");
+		    AERROR << msg;
+		    return Status(ErrorCode::PLANNING_ERROR, msg);
+		  }
+
+		  StBoundaryMapper boundary_mapper(
+		      adc_sl_boundary, st_boundary_config_, *reference_line_, path_data,
+		      dp_st_speed_config_.total_path_length(), dp_st_speed_config_.total_time(),
+		      reference_line_info_->IsChangeLanePath());
+
+		  auto* debug = reference_line_info_->mutable_debug();
+		  STGraphDebug* st_graph_debug = debug->mutable_planning_data()->add_st_graph();
+
+		  path_decision->EraseStBoundaries();
+		  if (boundary_mapper.CreateStBoundary(path_decision).code() ==
+		      ErrorCode::PLANNING_ERROR) {
+		    const std::string msg =
+		        "Mapping obstacle for dp st speed optimizer failed.";
+		    AERROR << msg;
+		    return Status(ErrorCode::PLANNING_ERROR, msg);
+		  }
+
+		  SpeedLimitDecider speed_limit_decider(adc_sl_boundary, st_boundary_config_,
+		                                        *reference_line_, path_data);
+
+		  if (!SearchStGraph(boundary_mapper, speed_limit_decider, path_data,
+		                     speed_data, path_decision, st_graph_debug)) {
+		    const std::string msg(Name() +
+		                          ":Failed to search graph with dynamic programming.");
+		    AERROR << msg;
+		    return Status(ErrorCode::PLANNING_ERROR, msg);
+		  }
+		  return Status::OK();
+		}
