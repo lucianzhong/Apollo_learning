@@ -208,7 +208,13 @@
 
 
 
+10
+  .  E0819 14:59:31.854367 22746 hdmap_input.cc:92] [mainboard] Failed to find hadmap file: /apollo/modules/map/data/fourlanes/base_map.bin
+	//solved 
+	  modules/common/data/global_flagfile.txt
 
+	  
+	--map_dir=/apollo/modules/map/hdmap/test-data
 
 
 

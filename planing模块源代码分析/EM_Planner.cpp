@@ -943,13 +943,8 @@ Status EMPlanner::PlanOnReferenceLine( const TrajectoryPoint& planning_start_poi
 
 modules/planning/tasks/dp_st_speed/dp_st_speed_optimizer.cc
 
-Status DpStSpeedOptimizer::Process(const SLBoundary& adc_sl_boundary,
-                                   const PathData& path_data,
-                                   const TrajectoryPoint& init_point,
-                                   const ReferenceLine& reference_line,
-                                   const SpeedData& reference_speed_data,
-                                   PathDecision* const path_decision,
-                                   SpeedData* const speed_data) {
+Status DpStSpeedOptimizer::Process( const SLBoundary& adc_sl_boundary, const PathData& path_data, const TrajectoryPoint& init_point,  const ReferenceLine& reference_line,  const SpeedData& reference_speed_data,
+                                    PathDecision* const path_decision,  SpeedData* const speed_data) {
 		  if (!is_init_) {
 		    AERROR << "Please call Init() before process DpStSpeedOptimizer.";
 		    return Status(ErrorCode::PLANNING_ERROR, "Not inited.");
@@ -973,23 +968,454 @@ Status DpStSpeedOptimizer::Process(const SLBoundary& adc_sl_boundary,
 		  STGraphDebug* st_graph_debug = debug->mutable_planning_data()->add_st_graph();
 
 		  path_decision->EraseStBoundaries();
-		  if (boundary_mapper.CreateStBoundary(path_decision).code() ==
-		      ErrorCode::PLANNING_ERROR) {
-		    const std::string msg =
-		        "Mapping obstacle for dp st speed optimizer failed.";
+
+		  if (boundary_mapper.CreateStBoundary(path_decision).code() ==  ErrorCode::PLANNING_ERROR) {  // Part 1. 障碍物st边界框计算--StBoundaryMapper::CreateStBoundary函数
+		    const std::string msg = "Mapping obstacle for dp st speed optimizer failed.";
 		    AERROR << msg;
 		    return Status(ErrorCode::PLANNING_ERROR, msg);
 		  }
 
-		  SpeedLimitDecider speed_limit_decider(adc_sl_boundary, st_boundary_config_,
-		                                        *reference_line_, path_data);
+		  SpeedLimitDecider speed_limit_decider(adc_sl_boundary, st_boundary_config_,  *reference_line_, path_data); //Part2 无人车速度限制--SpeedLimitDecider::GetSpeedLimits函数完成
 
-		  if (!SearchStGraph(boundary_mapper, speed_limit_decider, path_data,
-		                     speed_data, path_decision, st_graph_debug)) {
-		    const std::string msg(Name() +
-		                          ":Failed to search graph with dynamic programming.");
+
+		  if (!SearchStGraph(boundary_mapper, speed_limit_decider, path_data, speed_data, path_decision, st_graph_debug)) {   // 基于动态规划方法的速度规划--DpStGraph::Search完成
+		    const std::string msg(Name() +  ":Failed to search graph with dynamic programming.");
 		    AERROR << msg;
 		    return Status(ErrorCode::PLANNING_ERROR, msg);
 		  }
 		  return Status::OK();
 		}
+
+
+
+整体的速度规划分为两个部分：
+	1. 限制条件计算。包括障碍物st边界框，也就是某时刻无人车能前进的位置上下界；此外还有每个位置的速度限制(道路限速，超车限速等因素)
+	2. 速度规划
+
+
+// Part 1. 障碍物st边界框计算--StBoundaryMapper::CreateStBoundary函数
+
+对于每个障碍物以及他的预测轨迹(5s内，每0.1s有一个预测轨迹点)。只需要遍历每个障碍物预测轨迹点，然后去查询路径规划得到的路径点，如果两两有重叠，就可以构造一个(累计距离s，相对时间t)的一个锚点
+
+
+/modules/planning/tasks/st_graph/st_boundary_mapper.cc
+
+ for (int i = 0; i < trajectory.trajectory_point_size(); ++i) {
+      const auto& trajectory_point = trajectory.trajectory_point(i);
+      const Box2d obs_box = obstacle.GetBoundingBox(trajectory_point);
+
+      double trajectory_point_time = trajectory_point.relative_time();
+      constexpr double kNegtiveTimeThreshold = -1.0;
+      if (trajectory_point_time < kNegtiveTimeThreshold) {
+        continue;
+      }
+
+      const double step_length = vehicle_param_.front_edge_to_center();
+      for (double path_s = 0.0; path_s < discretized_path.Length(); path_s += step_length) {  // 在规划的路径下采样，每半车一个采样点
+        const auto curr_adc_path_point = discretized_path.Evaluate( path_s + discretized_path.StartPoint().s() );   // 计算采样点的累计距离s
+      
+        if (CheckOverlap(curr_adc_path_point, obs_box, st_boundary_config_.boundary_buffer())) {  // 确认障碍物和无人车在该时间点是够有重叠，如果没有重叠，就可以忽略该时间点的障碍物
+          // found overlap, start searching with higher resolution
+          const double backward_distance = -step_length; // 下界初始距离
+          const double forward_distance = vehicle_param_.length() + vehicle_param_.width() +  obs_box.length() + obs_box.width();  // 上节初始距离
+          const double default_min_step = 0.1;  // in meters
+          const double fine_tuning_step_length = std::fmin(
+              default_min_step, discretized_path.Length() / default_num_point);
+
+          bool find_low = false;
+          bool find_high = false;
+          double low_s = std::fmax(0.0, path_s + backward_distance);
+          double high_s =  std::fmin(discretized_path.Length(), path_s + forward_distance); // 采用步步紧靠的方法，构造更紧凑的上下界low_s和high_s
+        
+
+          while (low_s < high_s) {
+            if (find_low && find_high) {
+              break;
+            }
+            if (!find_low) {
+              const auto& point_low = discretized_path.Evaluate(
+                  low_s + discretized_path.StartPoint().s());
+              if (!CheckOverlap(point_low, obs_box,
+                                st_boundary_config_.boundary_buffer())) {
+                low_s += fine_tuning_step_length;
+              } else {
+                find_low = true;
+              }
+            }
+            if (!find_high) {
+              const auto& point_high = discretized_path.Evaluate(
+                  high_s + discretized_path.StartPoint().s());
+              if (!CheckOverlap(point_high, obs_box,
+                                st_boundary_config_.boundary_buffer())) {
+                high_s -= fine_tuning_step_length;
+              } else {
+                find_high = true;
+              }
+            }
+          }
+          if (find_high && find_low) {
+            lower_points->emplace_back( low_s - st_boundary_config_.point_extension(),  trajectory_point_time);  // 加入下界信息，对应在参考线上的累计距离s，和相对时间t(障碍物轨迹相对时间)
+            upper_points->emplace_back( high_s + st_boundary_config_.point_extension(), trajectory_point_time);
+          }
+          break;
+        }
+      }
+    }
+
+
+从上面代码我们可以很清晰的看到这个(累计距离s，相对时间t)标定框的计算，这个标定框可以解释为，无人车再该时间点，可以行驶到的坐标上下界。同时也会根据无人车状态跟随follow，减速yield，超车overtake等情况设定边界框类型。
+这个上下界的st边界框将存储在 PathObstacle 中，是每个时刻障碍物的所在的区域标定框，无人车不能与该标定框有冲突。
+
+
+/modules/planning/tasks/st_graph/st_boundary_mapper.cc
+
+Status StBoundaryMapper::MapWithDecision(  PathObstacle* path_obstacle, const ObjectDecisionType& decision) const {
+  DCHECK(decision.has_follow() || decision.has_yield() ||  decision.has_overtake())  << "decision is " << decision.DebugString()   << ", but it must be follow or yield or overtake.";
+  // 计算障碍物的边界框，当且仅当障碍物再某个时刻与无人车规划路径有重叠时，才被考虑。
+  std::vector<STPoint> lower_points;
+  std::vector<STPoint> upper_points;
+
+  if (!GetOverlapBoundaryPoints( path_data_.discretized_path().path_points(), *(path_obstacle->obstacle()), &upper_points, &lower_points)) {
+    return Status::OK();
+  }
+
+  if (decision.has_follow() && lower_points.back().t() < planning_time_) {
+    const double diff_s = lower_points.back().s() - lower_points.front().s();
+    const double diff_t = lower_points.back().t() - lower_points.front().t();
+    double extend_lower_s =
+        diff_s / diff_t * (planning_time_ - lower_points.front().t()) +
+        lower_points.front().s();
+    const double extend_upper_s =
+        extend_lower_s + (upper_points.back().s() - lower_points.back().s()) +
+        1.0;
+    upper_points.emplace_back(extend_upper_s, planning_time_);
+    lower_points.emplace_back(extend_lower_s, planning_time_);
+  }
+
+// 转成StBoundary，并且打上标签与数据，存入PathObstacle中
+  auto boundary = StBoundary::GenerateStBoundary( lower_points, upper_points).ExpandByS(boundary_s_buffer).ExpandByT(boundary_t_buffer);
+
+  // get characteristic_length and boundary_type.
+  StBoundary::BoundaryType b_type = StBoundary::BoundaryType::UNKNOWN;
+  double characteristic_length = 0.0;
+  if (decision.has_follow()) {
+    characteristic_length = std::fabs(decision.follow().distance_s());
+    b_type = StBoundary::BoundaryType::FOLLOW;
+  } else if (decision.has_yield()) {
+    characteristic_length = std::fabs(decision.yield().distance_s());
+    boundary = StBoundary::GenerateStBoundary(lower_points, upper_points)
+                   .ExpandByS(characteristic_length);
+    b_type = StBoundary::BoundaryType::YIELD;
+  } else if (decision.has_overtake()) {
+    characteristic_length = std::fabs(decision.overtake().distance_s());
+    b_type = StBoundary::BoundaryType::OVERTAKE;
+  } else {
+    DCHECK(false) << "Obj decision should be either yield or overtake: "
+                  << decision.DebugString();
+  }
+  boundary.SetBoundaryType(b_type);
+  boundary.SetId(path_obstacle->obstacle()->Id());
+  boundary.SetCharacteristicLength(characteristic_length);
+  path_obstacle->SetStBoundary(boundary);
+
+  return Status::OK();
+}
+
+最后可以遍历所有的 PathPbstacle ，获取所有的障碍物在不同时刻的st边界框以及边界框类型，该部分由DpStSpeedOptimizer::SearchStGraph中完成，所有的st边界框将存储在boundaries中。
+
+
+
+
+// Part2 无人车速度限制--SpeedLimitDecider::GetSpeedLimits函数完成
+
+/modules/planning/tasks/st_graph/speed_limit_decider.cc
+
+
+  // (1) speed limit from map
+    double speed_limit_on_reference_line = reference_line_.GetSpeedLimitFromS(frenet_point_s);
+
+    // (2) speed limit from path curvature
+    //  -- 2.1: limit by centripetal force (acceleration)
+    const double centri_acc_speed_limit = std::sqrt( GetCentricAccLimit( std::fabs(avg_kappa[i]) ) / std::fmax(std::fabs(avg_kappa[i]), st_boundary_config_.minimal_kappa()) );
+
+根据向心加速度公式: $ a = v ^2 / R = v^2 · kappa$，可以很轻松的计算速度：$ v = \sqrt(a / kappa)$。现在关键是向心加速度a如何计算，代码中在GetCentricAccLimit函数中实现，其实实现方法非常简单，根据(v_high, h_v_acc)和(v_low, l_v_acc)两个坐标点构建一个一元一次方程: $ y = av + b $，其中y是向心加速度，v是速度，a和b分别是斜率与截距。
+
+斜率计算：$ a = (h_v_acc - l_v_acc) / (v_high - v_low) = k1 $ 截距计算：$ b = h_v_acc - v_high * k1 = k2 $
+
+最后给定kappa(k)，可以得到对应的速度v：
+
+$ v^2 · k = acc = a·v + b $，整理得到:$ k·v^2 - av - b = 0 $
+
+根绝一元二次多项式的通用求解公式: $ v = (a + \sqrt(a^2 + 4kb))/2k $
+
+
+ const double v = (k1 + std::sqrt(k1 * k1 + 4.0 * kappa * k2)) / (2.0 * kappa);
+  ADEBUG << "v = " << v;
+
+  if (v > v_high) {
+    return h_v_acc;
+  } else if (v < v_low) {
+    return l_v_acc;
+  } else {
+    return v * k1 + k2;
+  }
+}
+
+代码还对最终的v做了一个区间的截取。限定在[h_v_acc, l_v_acc]中。
+
+
+
+    // -- 2.2: limit by centripetal jerk
+    double centri_jerk_speed_limit = std::numeric_limits<double>::max();
+    if (i + 1 < discretized_path_points.size()) {
+      const double ds = discretized_path_points.at(i + 1).s() -
+                        discretized_path_points.at(i).s();
+      DCHECK_GE(ds, 0.0);
+      const double kEpsilon = 1e-9;
+      const double centri_jerk =
+          std::fabs(avg_kappa[i + 1] - avg_kappa[i]) / (ds + kEpsilon);
+      centri_jerk_speed_limit = std::fmax(
+          10.0, st_boundary_config_.centri_jerk_speed_coeff() / centri_jerk);
+    }
+
+
+无人车微调限制
+遍历所有障碍物的侧方向标签，如果存在以下两种情况就需要微调速度：
+
+情况1：障碍物标签为向左微调ObjectNudge::LEFT_NUDGE，并且无人车确实被障碍物阻挡
+   // obstacle is on the right of ego vehicle (at path point i)
+      bool is_close_on_left = (nudge.type() == ObjectNudge::LEFT_NUDGE) && (frenet_point_l - vehicle_param_.right_edge_to_center() - kRange < const_path_obstacle->PerceptionSLBoundary().end_l());
+
+情况2：障碍物标签为向右微调ObjectNudge::RIGHT_NUDGE，并且无人车确实被障碍物阻挡
+   // obstacle is on the left of ego vehicle (at path point i)
+      bool is_close_on_right =
+          (nudge.type() == ObjectNudge::RIGHT_NUDGE) &&
+          (const_path_obstacle->PerceptionSLBoundary().start_l() - kRange <
+           frenet_point_l + vehicle_param_.left_edge_to_center());
+
+
+这两种情况下，需要对速度做限制，因为车道限速60km/s，向左或者向右微调的时候速度肯定不允许这么大，必须要乘以一个折扣因子。对于静态障碍物，折扣系数为static_obs_nudge_speed_ratio(0.6)；对于动态障碍物，由于障碍物也是运动的，
+所以允许系数大一点dynamic_obs_nudge_speed_ratio为0.8。最终无人车在该规划点处的速度限制就是以上个速度的最小值，
+
+
+
+//基于动态规划方法的速度规划--DpStGraph::Search完成
+
+目前已经知道:
+
+障碍物在每个时间点的st边界框(t时刻障碍物的lower_和upper_s，只要该时刻无人车的累积路径距离s不在这个区间内，说明无人车在这个点和障碍物位置是安全的)。
+累积距离方向上的速度限制，即[start_S,end_s]区间内有限制速度v_limit。
+接下来如何规划未来时间段的无人车速度，或者说哪个时间点无人车应该出现在哪里。DpStSpeedOptimizer速度规划器依旧使用的是动态规划方法。具体的做法与上述基于动态对话的路径规划器是很类似的：
+
+无人车需要对未来T时间，未来S距离内的时间距离进行规划，最简单的做法就是构建一张表格，例如大小为TxS，行代表0-T时刻的索引；列代表0-S距离上的索引。其中每个点table[t][s]就可以表示为初始规划点init_point到(相对时刻t，累积距离s)p2点的最小开销cost以及最小开销对应的父节点。例如现在有两个节点可以连接到table[t][s]，分别为table[t-1][s-1]和table[t-1][s-2]，那么可以分别计算两个节点到当前节点的开销cost1和cost2：
+
+table[t-1][s-2]到table[t][s]的开销为:
+cost1 = total_cost(t-1,s-2) + edge_cost(t,s,t-1,s-2)
+
+table[t-1][s-1]到table[t][s]的开销为:
+cost2 = total_cost(t-1,s-1) + edge_cost(t,s,t-1,s-1)
+
+如果cost1小于cost2，那么table[t][s]的总体最小开销total_cost(t,s)就为cost1，且父节点指针指向table[t-1][s-2]。
+
+最后如何寻找一条最优的路径？
+
+第一个问题肯定是要找到最优的规划结束点。在路径规划中，最优规划结束点由若干个，这些点的累计距离s是一致的，但是侧方偏移距离l不一致。那么在速度规划中也存在这个问题，我们对未来T时刻和累积距离S的路程进行规划，那么最终的规划结束点可以是：
+
+T秒结束以后规划结果，对应table[T][m]，m从0到S。(对应table最下行，规划时间一致，规划路径长度不一致)
+S规划距离结束的规划结果，对应table[n][S]，n从0到T。(对应table最右列，规划路径长度一致，规划时间不一致)
+选择最下行和最右列最小cost，然后自下而上可以找到一条cost最小的路径。下面可以参考一下代码的结构，总共分三步：
+
+初始化cost表，对应上面例子中的table
+循环计算cost表中每个元素的大小，也就是初始规划点init_point到(相对时刻t，累积距离s)p2点的最小开销cost
+依靠父指针，反向寻找最小cost对应的路径
+
+
+
+/modules/planning/tasks/dp_st_speed/dp_st_graph.cc
+
+Status DpStGraph::Search(SpeedData* const speed_data) {
+  constexpr float kBounadryEpsilon = 1e-2;
+  for (const auto& boundary : st_graph_data_.st_boundaries()) {
+    if (boundary->boundary_type() == StBoundary::BoundaryType::KEEP_CLEAR) {
+      continue;
+    }
+    if (boundary->IsPointInBoundary({0.0, 0.0}) ||
+        (std::fabs(boundary->min_t()) < kBounadryEpsilon &&
+         std::fabs(boundary->min_s()) < kBounadryEpsilon)) {
+      std::vector<SpeedPoint> speed_profile;
+      float t = 0.0;
+      for (int i = 0; i < dp_st_speed_config_.matrix_dimension_t();
+           ++i, t += unit_t_) {
+        SpeedPoint speed_point;
+        speed_point.set_s(0.0);
+        speed_point.set_t(t);
+        speed_profile.emplace_back(speed_point);
+      }
+      speed_data->set_speed_vector(speed_profile);
+      return Status::OK();
+    }
+  }
+
+  if (st_graph_data_.st_boundaries().empty()) {
+    ADEBUG << "No path obstacles, dp_st_graph output default speed profile.";
+    std::vector<SpeedPoint> speed_profile;
+    float s = 0.0;
+    float t = 0.0;
+    for (int i = 0; i < dp_st_speed_config_.matrix_dimension_t() &&
+                    i < dp_st_speed_config_.matrix_dimension_s();
+         ++i, t += unit_t_, s += unit_s_) {
+      SpeedPoint speed_point;
+      speed_point.set_s(s);
+      speed_point.set_t(t);
+      const float v_default = unit_s_ / unit_t_;
+      speed_point.set_v(v_default);
+      speed_point.set_a(0.0);
+      speed_profile.emplace_back(std::move(speed_point));
+    }
+    speed_data->set_speed_vector(std::move(speed_profile));
+    return Status::OK();
+  }
+
+// Step 1. 初始化cost表，对应上面例子中的table
+  if (!InitCostTable().ok()) {
+    const std::string msg = "Initialize cost table failed.";
+    AERROR << msg;
+    return Status(ErrorCode::PLANNING_ERROR, msg);
+  }
+
+ // Step B. 循环计算cost表中每个元素的大小，也就是初始规划点init_point到(相对时刻t，累积距离s)p2点的最小开销cost
+  if (!CalculateTotalCost().ok()) {
+    const std::string msg = "Calculate total cost failed.";
+    AERROR << msg;
+    return Status(ErrorCode::PLANNING_ERROR, msg);
+  }
+
+ // Step C. 依靠父指针，反向寻找最小cost对应的路径
+  if (!RetrieveSpeedProfile(speed_data).ok()) {
+    const std::string msg = "Retrieve best speed profile failed.";
+    AERROR << msg;
+    return Status(ErrorCode::PLANNING_ERROR, msg);
+  }
+  return Status::OK();
+}
+
+
+// 如何初始化表?--InitCostTable
+
+初始化cost表比较简单，行代表不同时刻t，列代表不同累计距离s。
+
+Status DpStGraph::InitCostTable() {
+  uint32_t dim_s = dp_st_speed_config_.matrix_dimension_s(); // 150m
+  uint32_t dim_t = dp_st_speed_config_.matrix_dimension_t(); // 8s
+  DCHECK_GT(dim_s, 2);
+  DCHECK_GT(dim_t, 2);
+  cost_table_ = std::vector<std::vector<StGraphPoint>>(
+      dim_t, std::vector<StGraphPoint>(dim_s, StGraphPoint()));
+
+  float curr_t = 0.0;
+  for (uint32_t i = 0; i < cost_table_.size(); ++i, curr_t += unit_t_) {
+    auto& cost_table_i = cost_table_[i];
+    float curr_s = 0.0;
+    for (uint32_t j = 0; j < cost_table_i.size(); ++j, curr_s += unit_s_) {
+      cost_table_i[j].Init(i, j, STPoint(curr_s, curr_t));
+    }
+  }
+  return Status::OK();
+}
+
+所以可以看到，cost表中对未来8s内以及前向150m的路程做了速度规划。且两行之间的时间差unit_t为1s；两列之间的距离距离差unit_s为1m。
+
+
+
+ // 如何计算节点最小cost？-CalculateTotalCost-
+计算表格的最小cost和每个表格节点的最小cost由函数DpStGraph::CalculateTotalCost和DpStGraph::CalculateCostAt完成。计算过程相对来说比较简单，一个节点table[t-1][s-1]连接当前节点table[t][s]，那么当前节点的cost计算可以分为4部分：
+
+障碍物项开销(节点内)
+限速项开销cost(节点间EdgeCost)
+加速度项开销cost(节点间EdgeCost)
+加速度抖动开销cost(节点间EdgeCost)
+节点内和节点间区别在于，节点内Cost也就是障碍物项惩罚只用到了当前时刻(t,s)的信息。而计算速度，加速度，加速度抖动需要用到前几个节点的信息，所以是节点间的cost，这么安排主要增加代码可读性。
+
+当前节点(相对时间t，累积距离s)和障碍物运动轨迹的开销。
+每个障碍物在未来的时间间隔内(例如5s，每0.1s就有一个采样的位置s)都有它的运动轨迹，也就是运动位置s_x。那么在相对时间t和累积距离s时刻，无人车会不会和障碍物该时刻相撞呢？这部分就需要计算无人车和障碍物在t时刻的位置信息，也就是位置cost。
+
+
+void DpStGraph::CalculateCostAt(const uint32_t c, const uint32_t r) {
+  auto& cost_cr = cost_table_[c][r];
+  cost_cr.SetObstacleCost(dp_st_cost_.GetObstacleCost(cost_cr));
+  if (cost_cr.obstacle_cost() > std::numeric_limits<float>::max()) {
+    return;
+  }
+
+
+障碍物位置开销思路比较简单，循环每个障碍物，计算t时刻障碍物st边界框的上界和下届，只需要无人车的位置(t,s)与边界框不重合即可。
+
+首先肯定要判断
+
+是不是障碍物的标签是禁停？是的话就不需要有cost，对无人车限制不了。cost=0
+t时刻障碍物轨迹是否存在(障碍物轨迹时间为min_t-max_t)？不存在，cost=0
+t时刻无人车是否和障碍物冲突了？是的话，cost无穷大。
+否则计算障碍物在t时刻的上界和下界位置，即上下界的累积距离s。为了避免其他节点再一次计算(t,s)时刻的障碍物上下界，可以采用缓存技术，只需要计算一次即可。
+
+
+/home/zy/apollo_offical_r3.0.0/apollo/modules/planning/tasks/dp_st_speed/dp_st_cost.cc
+// 利用缓存加速计算。GetBoundarySRange函数可以用来计算t时刻障碍物上界和下界累积距离s，并缓存
+  if (boundary_cost_[boundary_index][st_graph_point.index_t()].first < 0.0) {
+      boundary.GetBoundarySRange(t, &s_upper, &s_lower);
+      boundary_cost_[boundary_index][st_graph_point.index_t()] =
+          std::make_pair(s_upper, s_lower);
+    } else {
+      s_upper = boundary_cost_[boundary_index][st_graph_point.index_t()].first;
+      s_lower = boundary_cost_[boundary_index][st_graph_point.index_t()].second;
+    }
+
+// 如果t时刻无人车在障碍物后方，cost计算方法为：
+    if (s < s_lower) {
+      constexpr float kSafeTimeBuffer = 3.0;
+      const float len = obstacle->obstacle()->Speed() * kSafeTimeBuffer;
+      if (s + len < s_lower) { // 如果t时刻无人车在障碍物后方，cost计算方法为：
+        continue; 
+      } else {  // 否则距离小于安全距离，计算cost。obstacle_weight：1.0，default_obstacle_cost：1000，
+        cost += config_.obstacle_weight() * config_.default_obstacle_cost() *  std::pow((len - s_lower + s), 2);
+      }
+
+      // 如果t时刻无人车在障碍物前方，cost计算方法为：
+    } else if (s > s_upper) {
+      const float kSafeDistance = 20.0;  // or calculated from velocity  // 安全距离20米，也可以跟上面一样，根据速度来计算安全距离
+      if (s > s_upper + kSafeDistance) {  // 如果障碍物和无人车在t时刻距离大于安全距离，距离比较远，cost=0
+        continue;
+      } else {   // 否则距离小于安全距离，计算cost。obstacle_weight：1.0，default_obstacle_cost：1000，
+        cost += config_.obstacle_weight() * config_.default_obstacle_cost() * std::pow((kSafeDistance + s_upper - s), 2);
+      }
+    }
+
+    最终(相对时间t，累积距离s)所在的节点的障碍物开销就是所有障碍物个体开销的总和，每个个体开销计算方法如上。经过分析可以看到，个体障碍物开销大小取决于t时刻障碍物和无人车的距离，并与距离差平方成正比。
+
+
+
+    速度限制开销
+通过两个节点的累计距离s，和节点间的时间差unit_t，可以间接计算时间段[t-1,t]内的平均速度。
+
+如果速度小于最大速度，并且在禁停区内，计算方式为：
+  if (speed < FLAGS_max_stop_speed && InKeepClearRange(second.s())) {
+    // first.s in range
+    cost += config_.keep_clear_low_speed_penalty() * unit_t_ *  // keep_clear_low_speed_penalty:10  // keep_clear_low_speed_penalty:10
+            config_.default_speed_cost();
+  }
+
+
+// 计算当前速度和限速的差值比，小于0说明比限制速度小。
+  float det_speed = (speed - speed_limit) / speed_limit;
+  if (det_speed > 0) {  
+    cost += config_.exceed_speed_penalty() * config_.default_speed_cost() * fabs(speed * speed) * unit_t_;   // exceed_speed_penalty: 10, default_speed_cost: 10
+  } else if (det_speed < 0) {
+    cost += config_.low_speed_penalty() * config_.default_speed_cost() *  -det_speed * unit_t_;  // low_speed_penalty: 10, default_speed_cost: 10
+  }
+
+  所以从上面计算方法可以得到以下结论：
+
+结论1：在禁停区需要有一定的cost。
+
+结论2：代码鼓励无人车在该路径段内行驶速度低于最高限速，可以看到该情况下cost小于0，有奖励。反之超速了，惩罚与速度平法成正比。
+
+
