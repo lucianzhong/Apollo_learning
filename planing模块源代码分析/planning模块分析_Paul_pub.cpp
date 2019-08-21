@@ -1,307 +1,26 @@
- 1.
- 规划（Planning）模块位于命名空间：apollo::planning，其作用在于构建无人车从起点到终的局部行驶路径，
- 具体而言，就是给定导航地图、导航路径、当前定位点、车辆状态（包括：位置、速度、加速度、底盘）、 周边目标的感知及预测信息（如交通标志和障碍物等），规划模块计算出可供控制模块（Controller）执行的一条安全且舒适的行驶路径。
- 注意，规划模块输出的路径是局部路径而非全局路径。
- 举个简单示例加以说明，假如无人车需从长沙智能驾驶研究院行驶至长沙高铁南站，首先需借助Routing（路由寻径）模块输出全局导航路径，接下来才是规划模块基于全局导航路径进行一小段、一小段具体行驶路径的规划
+Reference:
+https://paul.pub/apollo-planning/
 
 
-2.
- Planning功能模块的启动命令为：
-	/apollo/bazel-bin/cyber/mainboard -p compute_sched -d /apollo/modules/planning/dag/planning.dag
-	
-	-p compute_sched表明使用配置文件/apollo/cyber/conf/compute_sched.conf进行任务调度，该参数可忽略
-	-d /apollo/modules/planning/dag/planning.dag表明动态加载的是Planning模块
-	Planning模块的主入口为：/apollo/cyber/mainboard/mainboard.cc
+1.
+ Apollo系统中的Planning模块实际上是整合了决策和规划两个功能，该模块是自动驾驶系统中最核心的模块之一（另外三个核心模块是：定位，感知和控制）
 
+	这其中主要的组件包括：
+		Apollo FSM：一个有限状态机，与高清地图确定车辆状态给定其位置和路线。
+		Planning Dispatcher：根据车辆的状态和其他相关信息，调用合适的Planner。
+		Planner：获取所需的上下文数据和其他信息，确定相应的车辆意图，执行该意图所需的规划任务并生成规划轨迹。它还将更新未来作业的上下文。
+		Deciders和Optimizers：一组实现决策任务和各种优化的无状态库。优化器特别优化车辆的轨迹和速度。决策者是基于规则的分类决策者，他们建议何时换车道、何时停车、何时爬行（慢速行进）或爬行何时完成。
+		黄色框：这些框被包含在未来的场景和/或开发人员中，以便基于现实世界的驱动用例贡献他们自己的场景。
 
-3. /apollo/cyber/mainboard/mainboard.cc
+	PncMap：全称是Planning and Control Map。这个部分的实现并不在Planning内部，而是位于/modules/map/pnc_map/目录下。但是由于该实现与Planning模块紧密相关，因此这里放在一起讨论。该模块的主要作用是：根据Routing提供的数据，生成Planning模块需要的路径信息。
+	Frame：Frame中包含了Planning一次计算循环中需要的所有数据。例如：地图，车辆状态，参考线，障碍物信息等等。ReferenceLine是车辆行驶的参考线，TrafficDecider与交通规则相关，这两个都是Planning中比较重要的子模块，因此会在下文中专门讲解。
+	EM Planner：下文中我们会看到，Apollo系统中内置了好几个Planner，但目前默认使用的是EM Planner，这也是专门为开放道路设计的。该模块的实现可以说是整个Planning模块的灵魂所在。因此其算法值得专门用另外一篇文章来讲解。
+		读者也可以阅读其官方论文来了解：Baidu Apollo EM Motion Planner。
 
-	int main(int argc, char** argv) {
-	  google::SetUsageMessage("we use this program to load dag and run user apps.");
 
-	  // parse the argument
-	  ModuleArgument module_args;
-	  module_args.ParseArgument(argc, argv);   //main函数十分简单，首先是解析参数
-
-	  // initialize cyber
-	  apollo::cyber::Init(argv[0]);			// 初始化cyber环境
-
-	  // start module
-	  ModuleController controller(module_args);  //接下来创建一个ModuleController类对象controller
-	  if (!controller.Init()) {  				//调用controller.Init()启动相关功能模块,ModuleController::Init()函数十分简单，内部调用了ModuleController::LoadAll()函数
-	    controller.Clear();
-	    AERROR << "module start error.";
-	    return -1;
-	  }
-
-	  apollo::cyber::WaitForShutdown();		// 进入Cyber RT的消息循环，直到等待cyber::WaitForShutdown()返回
-	  controller.Clear();
-	  AINFO << "exit mainboard.";
-
-	  return 0;
-	}
-
-
-
-4. cyber/mainboard/module_controller.cc
-
-	bool ModuleController::LoadAll() {
-	  const std::string work_root = common::WorkRoot();
-	  const std::string current_path = common::GetCurrentPath();
-	  const std::string dag_root_path = common::GetAbsolutePath(work_root, "dag");
-
-	  for (auto& dag_conf : args_.GetDAGConfList()) {
-	    std::string module_path = "";
-	    if (dag_conf == common::GetFileName(dag_conf)) {
-	      // case dag conf argument var is a filename
-	      module_path = common::GetAbsolutePath(dag_root_path, dag_conf);
-	    } else if (dag_conf[0] == '/') {
-	      // case dag conf argument var is an absolute path
-	      module_path = dag_conf;
-	    } else {
-	      // case dag conf argument var is a relative path
-	      module_path = common::GetAbsolutePath(current_path, dag_conf);
-	      if (!common::PathExists(module_path)) {
-	        module_path = common::GetAbsolutePath(work_root, dag_conf);
-	      }
-	    }
-	    AINFO << "Start initialize dag: " << module_path;
-	    if (!LoadModule(module_path)) {
-	      AERROR << "Failed to load module: " << module_path;
-	      return false;
-	    }
-	  }
-	  return true;
-	}
-
-	//上述函数处理一个dag_conf配置文件循环，读取配置文件中的所有dag_conf，并逐一调用bool ModuleController::LoadModule(const std::string& path)函数加载功能模块。
-
-
-// apollo::planning::PlanningComponent类对象的创建过程
-
-
-5.Cyber RT使用工厂设计模式创建apollo::planning::PlanningComponent类对象
-
-
-6. apollo::planning::PlanningComponent类的注册过程
-
-
-
-
-7. apollo::planning::PlanningComponent类对象的动态创建过程
-
-
-
-
-
-
-
-
-
-
-//具体规划算法分析
-
-8.   Apollo 3.5将规划分为两种模式： OnLanePlanning（车道规划，可用于城区及高速公路各种复杂道路）
-								NaviPlanning（导航规划，主要用于高速公路）
-     
-     根据Apollo团队的最新开发思路，今后只会保留一个规划算法：PublicRoadPlanner
-
-	包含四种具体规划算法：
-	   1. PublicRoadPlanner（即以前的EMPlanner，是Apollo 3.5的主用规划算法）
-	   2. LatticePlanner（Apollo 3.5的第二重要规划算法，成熟度不足，里面的一些优秀算法思想将被融合到PublicRoadPlanner中，今后该算法将不再维护）
-	   3. NaviPlanner（百度美研与长沙智能驾驶研究院合作开发，主要用于高速公路场景）
-	   4. RTKPlanner（循迹算法，一般不用。如需循迹，可使用Python脚本程序modules/tools/record_play/rtk_player.py）
-
-
-9. 场景(Scenario):
-    
-    每个场景又包含若干个阶段(Stage)，在每个阶段均使用若干个任务(Task)生成局部行驶轨迹.
-    基于场景(Scenario)、阶段(Stage)和任务(Task)的理念进行规划，优点是能合理有效地应对每种场景，易于扩充，并且基于配置文件动态增减场景、阶段及使用的任务，灵活性强；缺点是可能会遗漏一些特殊场景，但可通过不断扩充新的场景加以解决
-
-	PublicRoadPlanner算法从Routing模块输出的高精地图Lane序列获得全局导航路径，基于场景(Scenario)的理念进行局部行驶轨迹规划。
-	具体而言，将公共道路行驶划分为
-
-			 1.BareIntersectionUnprotectedScenario(裸露交叉路口无保护场景，即没有红绿灯及交通标志的交叉路口场景，感谢Apollo美研团队Yifei Jiang老师的答疑)
-			 2.LaneFollowScenario(跟车场景)
-			 3.NarrowStreetUTurnScenario(狭窄街道调头场景，暂未实现)
-			 4.SidePassScenario(侧向通行场景，即前方有停止车辆，借道绕行后再回原车道)
-			 5.StopSignUnprotectedScenario(停止标志无保护场景)
-			 6.TrafficLightProtectedScenario(红绿灯保护场景)
-			 7.TrafficLightUnprotectedLeftTurnScenario(红绿灯无保护左转弯场景)
-			 8.TrafficLightUnprotectedRightTurnScenario(红绿灯无保护右转弯场景)
-			 9.PullOverScenario（靠边停车场景）
-			 10.ValetParkingScenario(泊车场景)等多个场景
-
-10.阶段(Stage)
-
-	BareIntersectionUnprotectedScenario场景包含:
-												BareIntersectionUnprotectedStageApproach、
-												BareIntersectionUnprotectedStageIntersectionCruise两个阶段；
-
-
-	LaneFollowScenario场景包含
-								LaneFollowStage一个阶段；
-
-
-	SidePassScenario场景包含
-
-							StageApproachObstacle、
-							StageDetectSafety、
-							StageGeneratePath、
-							StageStopOnWaitPoint、
-							StagePassObstacle、
-							StageBackup六个阶段；
-
-
-	StopSignUnprotectedScenario场景包含
-										StopSignUnprotectedStagePreStop、
-										StopSignUnprotectedStageStop、
-										StopSignUnprotectedStageCreep、
-										StopSignUnprotectedStageIntersectionCruise四个阶段；
-
-
-
-	TrafficLightProtectedScenario场景包含
-
-										TrafficLightProtectedStageApproach、
-										TrafficLightProtectedStageIntersectionCruise两个阶段；
-
-
-	TrafficLightUnprotectedLeftTurnScenario场景包含
-													TrafficLightUnprotectedLeftTurnStageStop、
-													TrafficLightUnprotectedLeftTurnStageCreep、
-													TrafficLightUnprotectedLeftTurnStageIntersectionCruise三个阶段；
-
-
-	TrafficLightUnprotectedRightTurnScenario场景包含
-														TrafficLightUnprotectedRightTurnStageStop、
-														TrafficLightUnprotectedRightTurnStageCreep、
-														TrafficLightUnprotectedRightTurnStageIntersectionCruise三个阶段；
-
-
-
-	PullOverScenario场景包含PullOverStageApproach一个阶段（尚未开发完毕）；
-
-	ValetParkingScenario场景包含StageApproachingParkingSpot、
-								StageParking两个阶段。
-
-
-11.任务(Task)
-
-   任务分为决策（Decider）与优化（Optimizer ）两类，
-   其中决策类任务包含PathLaneBorrowDecider,SpeedLimitDecider等（所有决策类任务均包含于modules/planning/tasks/deciders目录），
-
-   优化类任务包含DpPolyPathOptimizer、DpStSpeedOptimizer等（所有优化类任务均包含于modules/planning/tasks/optimizers目录）。
-
-   任意一个场景中的任意一个阶段均会利用上述两类任务的若干种。
-   例如，BareIntersectionUnprotectedScenario场景中的BareIntersectionUnprotectedStageApproach阶段使用了PathDecider、SpeedBoundsDecider、DpStSpeedOptimizer、
-        SpeedDecider、SpeedBoundsDecider等决策任务及DpPolyPathOptimizer、DpPolyPathOptimizer等优化任务（见配置文件modules/planning/conf/scenario/bare_intersection_unprotected_config.pb.txt）。
-
-
-
-
-
-
-
-
-
-
-12. apollo/modules/planning/scenarios/scenario_manager.cc
-
-	ScenarioManager::ScenarioDispatch使用Strategy设计模式来分派具体的场景
-
-	void ScenarioManager::ScenarioDispatch(const common::TrajectoryPoint& ego_point, const Frame& frame) {
-
-																											}
-
-
-
-13.	与PublicRoadPlanner规划算法相关的有两处: 1. PublicRoadPlanner::Init
-										 2. PublicRoadPlanner::Plan
-
-
-PublicRoadPlanner::Init:  首先读取配置文件/apollo/modules/planning/conf/planning_config.pb.txt，获取所有支持的场景supported_scenarios，
-
-						  然后调用scenario_manager_.Init(supported_scenarios);对这些场景进行初始化: 具体而言就是先调用ScenarioManager::RegisterScenarios函数将配置文件中的所有场景添加到场景管理器对象scenario::ScenarioManager scenario_manager_中，
-						  																	   再调用ScenarioManager::CreateScenario函数，生成当前路况对应的场景对象std::unique_ptr<Scenario> current_scenario_。
-
-
-
-
-PublicRoadPlanner::Plan函数内:首先调用函数 ScenarioManager:Update 根据实时路况更新当前场景对象std::unique_ptr<Scenario> current_scenario_，
-
-                             接着调用scenario_->Process(planning_start_point, frame)语句实施具体的场景算法。如果Scenario::Process函数的返回值是scenario::Scenario::STATUS_DONE，表明当前场景状态已完成，则再次调用函数ScenarioManager::Update更新当前场景，否则继续处理当前场景并返回。
-
-
-14. 看场景更新函数 ScenarioManager::Update 的代码
-
-	apollo/modules/planning/scenarios/scenario_manager.cc
-
-	void ScenarioManager::Update(const common::TrajectoryPoint& ego_point,
-                             const Frame& frame) {
-	  CHECK(!frame.reference_line_info().empty());
-	  Observe(frame);
-	  ScenarioDispatch(ego_point, frame);
-	}
-    
-     ScenarioManager::Observe:
-     用于更新first_encountered_overlap_map_（车辆沿着参考线行驶首次遇到的道路连接的键值对，key表示道路连接类型，例如：PNC_JUNCTION（用于规划控制模块的交叉路口，是一个由多条道路停止线包围而成的多边形区域，
-         感谢Apollo美研团队Yifei Jiang老师的答疑）、SIGNAL（红绿灯） 、STOP_SIGN（停止标志）、YIELD_SIGN（让行标志），value表示对应的地图元素数据）
-     
-
-
-     ScenarioManager::ScenarioDispatch使用Strategy设计模式来分派具体的场景
-
-
-
-
-15. Apollo系统中的Planning模块实际上是整合了决策和规划两个功能，该模块是自动驾驶系统中最核心的模块之一（另外三个核心模块是：定位，感知和控制）
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-16. 基础数据结构:
+2. 基础数据结构:
 
 	这些数据结构集中定义在两个地方：
-
 	proto目录：该目录下都是通过Protocol Buffers格式定义的结构。这些结构会在编译时生成C++需要的文件。这些结构没有业务逻辑，就是专门用来存储数据的。（实际上不只是Planning，几乎每个大的模块都会有自己的proto文件夹。）
 	common目录：这里是C++定义的数据结构。很显然，通过C++定义数据结构的好处是这些类的实现中可以包含一定的处理逻辑。
 
@@ -339,7 +58,6 @@ PublicRoadPlanner::Plan函数内:首先调用函数 ScenarioManager:Update 根�
 	├── st_boundary_config.proto
 	├── traffic_rule_config.proto
 	└── waypoint_sampler_config.proto
-
 
 	自动生成C++需要的数据结构
 	可以方便的从文本文件导入和导出。下文将看到，Planning模块中有很多配置文件就是和这里的proto结构相对应的
@@ -396,7 +114,7 @@ PublicRoadPlanner::Plan函数内:首先调用函数 ScenarioManager:Update 根�
 	planning_gflags.h		定义了模块需要的许多常量，例如各个配置文件的路径。
 
 
-17. 模块配置
+3. 模块配置
 	Planning模块中有很多处的逻辑是通过配置文件控制的。通过将这部分内容从代码中剥离，可以方便的直接对配置文件进行调整，而不用编译源代码。这对于系统调试和测试来说，是非常方便的。
 	Apollo系统中，很多模块都是类似的设计。因此每个模块都会将配置文件集中放在一起，也就是每个模块下的conf目录。
 
@@ -428,40 +146,51 @@ PublicRoadPlanner::Plan函数内:首先调用函数 ScenarioManager:Update 根�
 
 
 
-18. /modules/planning/on_lane_planning.cc
+4. 
 
-	StdPlanning::RunOnce
+	Cyber RT以组件的方式来管理各个模块，组件的实现会基于该框架提供的基类：apollo::cyber::Component。
 
+	Planning模块自然也不例外。其实现类是下面这个
+	modules/planning/planning_component.h
 
-
-
-
-
-
+	class PlanningComponent final:public cyber::Component<prediction::PredictionObstacles, canbus::Chassis, localization::LocalizationEstimate> { }
 
 
+在PlanningComponent的实现中，会根据具体的配置选择Planning的入口。Planning的入口通过PlanningBase类来描述的。
+PlanningBase只是一个抽象类，该类有三个子类：
+	OpenSpacePlanning
+	NaviPlanning
+	StdPlanning
+
+bool PlanningComponent::Init() {
+  if (FLAGS_open_space_planner_switchable) {
+    planning_base_ = std::make_unique<OpenSpacePlanning>();
+  } else {
+    if (FLAGS_use_navigation_mode) {
+      planning_base_ = std::make_unique<NaviPlanning>();
+    } else {
+      planning_base_ = std::make_unique<StdPlanning>();
+    }
+  }
+  CHECK(apollo::common::util::GetProtoFromFile(FLAGS_planning_config_file, &config_)) << "failed to load planning config file " << FLAGS_planning_config_file;
+  planning_base_->Init(config_);
+
+	目前，FLAGS_open_space_planner_switchable和FLAGS_use_navigation_mode的配置都是false，因此最终的Planning入口类是：StdPlanning。
+
+
+	所以接下来，我们只要关注StdPlanning的实现即可。在这个类中，下面这个方法是及其重要的：
+
+	apollo/modules/planning/on_lane_planning.cc
+	void OnLanePlanning::RunOnce( const LocalView& local_view, ADCTrajectory* const ptr_trajectory_pb) { }
+	方法的注释已经说明得很清楚了：这是Planning模块的主体逻辑，会被timer以固定的间隔调用。每次调用就是一个规划周期
 
 
 
+5.
 
-
-
-
-
-
-
-
-
-
-
-19. Planner概述
-
-	Planner的配置文件路径是在planning_gflags.cc中指定的,/modules/planning/common/planning_gflags.cc
-
-
-		// planning config file
-	DEFINE_string(planning_config_file,
-	              "/apollo/modules/planning/conf/planning_config.pb.txt", "planning config file");
+	Planner的配置文件路径是在planning_gflags.cc中指定的,/modules/planning/common/planning_gflags.cc 
+	// planning config file
+	DEFINE_string(planning_config_file, "/apollo/modules/planning/conf/planning_config.pb.txt", "planning config file");
 
 
 	modules/planning/conf/planning_config.pb.txt
@@ -485,7 +214,6 @@ PublicRoadPlanner::Plan函数内:首先调用函数 ScenarioManager:Update 根�
 	  if (!apollo::cyber::common::GetProtoFromFile(FLAGS_planning_config_file, &planning_config)) {
 	    return nullptr;
 	  }
-
 	  auto planner_type = PlannerType::NAVI;
 	  if (planning_config.has_navigation_planning_config()) {
 	    planner_type = planning_config.navigation_planning_config().planner_type(0);
@@ -497,11 +225,11 @@ PublicRoadPlanner::Plan函数内:首先调用函数 ScenarioManager:Update 根�
 
 
 
-20. PublicRoadPlanner
-	
+6. PublicRoadPlanner
+	PublicRoadPlanner是目前默认的Planner，它实现了EM（Expectation Maximization）算法。
 	Planner的算法实现依赖于两个输入：
-	车辆自身状态：通过 TrajectoryPoint 描述。该结构中包含了车辆的位置，速度，加速度，方向等信息。
-	当前环境信息：通过Frame描述。前面我们已经提到，Frame中包含了一次Planning计算循环中的所有信息。
+		车辆自身状态：通过 TrajectoryPoint 描述。该结构中包含了车辆的位置，速度，加速度，方向等信息。
+		当前环境信息：通过Frame描述。前面我们已经提到，Frame中包含了一次Planning计算循环中的所有信息。
 
 	/modules/planning/planner/public_road/public_road_planner.cc
 
@@ -523,7 +251,6 @@ PublicRoadPlanner::Plan函数内:首先调用函数 ScenarioManager:Update 根�
 	  bool is_new_routing = false;
 	  std::shared_ptr<relative_map::MapMsg> relative_map;								//相对地图信息
 	};
-
 
 
 	对于每个Planner来说，其主要的逻辑都实现在Plan方法中:
@@ -552,26 +279,16 @@ PublicRoadPlanner::Plan函数内:首先调用函数 ScenarioManager:Update 根�
 
 
 
-21. Scenario 场景分类
-
+7. Scenario 场景分类
 	Apollo3.5聚焦在三个主要的驾驶场景:
-
 	1.车道保持
-		车道保持场景是默认的驾驶场景，它不仅仅包含单车道巡航。同时也包含了：
-																	换道行驶
-																	遵循基本的交通约定
-																	基本转弯
+		车道保持场景是默认的驾驶场景，它不仅仅包含单车道巡航。同时也包含了：换道行驶,遵循基本的交通约定,基本转弯
 
 	2. Side Pass
-		在这种情况下，如果在自动驾驶车辆（ADC）的车道上有静态车辆或静态障碍物，并且车辆不能在不接触障碍物的情况下安全地通过车道，则执行以下策略：
-
-																															检查邻近车道是否接近通行
-																															如果无车辆，进行绕行，绕过当前车道进入邻道
-																															一旦障碍物安全通过，回到原车道上
+		在这种情况下，如果在自动驾驶车辆（ADC）的车道上有静态车辆或静态障碍物，并且车辆不能在不接触障碍物的情况下安全地通过车道，则执行以下策略：检查邻近车道是否接近通行,如果无车辆，进行绕行，绕过当前车道进入邻道,一旦障碍物安全通过，回到原车道上
 
     3.停止标识
 		停止标识有两种分离的驾驶场景：
-
 		1、未保护：在这种情况下，汽车预计会通过具有双向停车位的十字路口。因此，我们的ADC必须爬过并测量十字路口的交通密度，然后才能继续走上它的道路
 		2、受保护：在此场景中，汽车预期通过具有四向停车位的十字路口导航。我们的ADC将必须对在它之前停下来的汽车进行测量，并在移动之前了解它在队列中的位置
 
@@ -581,10 +298,8 @@ PublicRoadPlanner::Plan函数内:首先调用函数 ScenarioManager:Update 根�
 
 	//ScenarioManager：场景管理器类。负责注册，选择和创建Scenario
 	/modules/planning/scenarios/scenario_manager.cc 
-
 	//Scenario：描述一个特定的场景（例如：Side Pass）。该类中包含了CreateStage方法用来创建Stage。一个Scenario可能有多个Stage对象。在Scenario中会根据配置顺序依次调用Stage::Process方法。该方法的返回值决定了从一个Stage切换到另外一个Stage
 	/modules/planning/scenarios/scenario.cc
-
 	//Stage：如上面所说，一个Scenario可能有多个Stage对象。场景功能实现的主体逻辑通常是在Stage::Process方法中
 	/modules/planning/scenarios/stage.cc
 
@@ -1064,3 +779,85 @@ PublicRoadPlanner::Plan函数内:首先调用函数 ScenarioManager:Update 根�
 	  bool is_new_routing = false;
 	  std::shared_ptr<relative_map::MapMsg> relative_map;
 	};
+
+
+
+
+	可借助GDB调试命令对上述执行流程进行更为深入的理解，例如TrafficLightProtectedScenario场景中TrafficLightProtectedStageApproach阶段的PathLaneBorrowDecider任务的调用堆栈如下，从下往上看，对于任意一个任务的调用流程一目了然：
+
+#0  apollo::planning::PathLaneBorrowDecider::Process (this=0x7f8c28294460, frame=0x7f8c38029f70, 
+    reference_line_info=0x7f8c3802b140) at modules/planning/tasks/deciders/path_lane_borrow_decider/path_lane_borrow_decider.cc:39
+#1  0x00007f8c0468b7c8 in apollo::planning::Decider::Execute (this=0x7f8c28294460, frame=0x7f8c38029f70, 
+    reference_line_info=0x7f8c3802b140) at modules/planning/tasks/deciders/decider.cc:31
+#2  0x00007f8c065c4a01 in apollo::planning::scenario::Stage::ExecuteTaskOnReferenceLine (this=0x7f8c28293eb0, 
+    planning_start_point=..., frame=0x7f8c38029f70) at modules/planning/scenarios/stage.cc:96
+#3  0x00007f8c06e721da in apollo::planning::scenario::traffic_light::TrafficLightProtectedStageApproach::Process (
+    this=0x7f8c28293eb0, planning_init_point=..., frame=0x7f8c38029f70) at 
+    modules/planning/scenarios/traffic_light/protected/stage_approach.cc:48
+#4  0x00007f8c067f1732 in apollo::planning::scenario::Scenario::Process (
+    this=0x7f8c2801bf20, planning_init_point=..., frame=0x7f8c38029f70) 
+    at modules/planning/scenarios/scenario.cc:76
+#5  0x00007f8c186e153a in apollo::planning::PublicRoadPlanner::Plan (
+    this=0x23093de0, planning_start_point=..., frame=0x7f8c38029f70, 
+    ptr_computed_trajectory=0x7f8b9a5fbed0) at modules/planning/planner/public_road/public_road_planner.cc:51
+#6  0x00007f8c19ee5937 in apollo::planning::OnLanePlanning::Plan (
+    this=0x237f3b0, current_time_stamp=1557133995.3679764, stitching_trajectory=std::vector of length 1, 
+    capacity 1 = {...}, ptr_trajectory_pb=0x7f8b9a5fbed0)  at modules/planning/on_lane_planning.cc:436
+#7  0x00007f8c19ee40fa in apollo::planning::OnLanePlanning::RunOnce (
+    this=0x237f3b0, local_view=..., ptr_trajectory_pb=0x7f8b9a5fbed0) at modules/planning/on_lane_planning.cc:304
+#8  0x00007f8c1ab0d494 in apollo::planning::PlanningComponent::Proc (
+    this=0x1d0f310, prediction_obstacles=std::shared_ptr (count 4, weak 0) 0x7f8b840164f8, 
+    chassis=std::shared_ptr (count 4, weak 0) 0x7f8b84018a08, 
+    localization_estimate=std::shared_ptr (count 4, weak 0) 0x7f8b8400d3b8) at modules/planning/planning_component.cc:134
+#9  0x00007f8c1abb46c4 in apollo::cyber::Component<apollo::prediction::PredictionObstacles, 
+    apollo::canbus::Chassis, apollo::localization::LocalizationEstimate, apollo::cyber::NullType>::Process (this=0x1d0f310, 
+    msg0=std::shared_ptr (count 4, weak 0) 0x7f8b840164f8, msg1=std::shared_ptr (count 4, weak 0) 0x7f8b84018a08, 
+    msg2=std::shared_ptr (count 4, weak 0) 0x7f8b8400d3b8) at ./cyber/component/component.h:291
+#10 0x00007f8c1aba2698 in apollo::cyber::Component<apollo::prediction::PredictionObstacles, 
+    apollo::canbus::Chassis, apollo::localization::LocalizationEstimate, apollo::cyber::NullType>::Initialize(
+    apollo::cyber::proto::ComponentConfig const&)::{lambda(std::shared_ptr<apollo::prediction::PredictionObstacles> const&,     
+    std::shared_ptr<apollo::canbus::Chassis> const&, std::shared_ptr<apollo::localization::LocalizationEstimate> const&)#2}::operator()
+    (std::shared_ptr<apollo::prediction::PredictionObstacles> const&, std::shared_ptr<apollo::canbus::Chassis> const&, 
+    std::shared_ptr<apollo::localization::LocalizationEstimate> const&) const (__closure=0x2059a430, 
+    msg0=std::shared_ptr (count 4, weak 0) 0x7f8b840164f8, msg1=std::shared_ptr (count 4, weak 0) 0x7f8b84018a08,     
+    msg2=std::shared_ptr (count 4, weak 0) 0x7f8b8400d3b8) at ./cyber/component/component.h:378
+#11 0x00007f8c1abb4ad2 in apollo::cyber::croutine::RoutineFactory apollo::cyber::croutine::CreateRoutineFactory
+    <apollo::prediction::PredictionObstacles, apollo::canbus::Chassis, apollo::localization::LocalizationEstimate, 
+    apollo::cyber::Component<apollo::prediction::PredictionObstacles, apollo::canbus::Chassis, 
+    apollo::localization::LocalizationEstimate, apollo::cyber::NullType>::Initialize(
+    apollo::cyber::proto::ComponentConfig const&)::{lambda(std::shared_ptr<apollo::prediction::PredictionObstacles> const&, 
+    std::shared_ptr<apollo::canbus::Chassis> const&, std::shared_ptr<apollo::localization::LocalizationEstimate> const&)#2}&>
+    (apollo::cyber::Component<apollo::prediction::PredictionObstacles, apollo::canbus::Chassis, 
+    apollo::localization::LocalizationEstimate, apollo::cyber::NullType>::Initialize(apollo::cyber::proto::ComponentConfig const&)::
+    {lambda(std::shared_ptr<apollo::prediction::PredictionObstacles> const&, std::shared_ptr<apollo::canbus::Chassis> const&, 
+    std::shared_ptr<apollo::localization::LocalizationEstimate> const&)#2}&, 
+    std::shared_ptr<apollo::cyber::data::DataVisitor<apollo::prediction::PredictionObstacles, 
+    apollo::canbus::Chassis, apollo::localization::LocalizationEstimate, apollo::cyber::NullType> > const&)::
+    {lambda()#1}::operator()() const::{lambda()#1}::operator()() const (__closure=0x2059a420) at ./cyber/croutine/routine_factory.h:108
+#12 0x00007f8c1ac0466a in std::_Function_handler<void (), apollo::cyber::croutine::RoutineFactory 
+apollo::cyber::croutine::CreateRoutineFactory<apollo::prediction::PredictionObstacles, apollo::canbus::Chassis, apollo::localization::LocalizationEstimate, 
+apollo::cyber::Component<apollo::prediction::PredictionObstacles, apollo::canbus::Chassis, apollo::localization::LocalizationEstimate, 
+apollo::cyber::NullType>::Initialize(apollo::cyber::proto::ComponentConfig const&)::{lambda(std::shared_ptr<apollo::prediction::PredictionObstacles> const&, 
+std::shared_ptr<apollo::canbus::Chassis> const&, std::shared_ptr<apollo::localization::LocalizationEstimate> const&)#2}&>
+(apollo::cyber::Component<apollo::prediction::PredictionObstacles, apollo::canbus::Chassis, apollo::localization::LocalizationEstimate, 
+apollo::cyber::NullType>::Initialize(apollo::cyber::proto::ComponentConfig const&)::{lambda(std::shared_ptr<apollo::prediction::PredictionObstacles> const&, 
+std::shared_ptr<apollo::canbus::Chassis> const&, std::shared_ptr<apollo::localization::LocalizationEstimate> const&)#2}&, 
+std::shared_ptr<apollo::cyber::data::DataVisitor<apollo::prediction::PredictionObstacles, apollo::canbus::Chassis, apollo::localization::LocalizationEstimate, 
+apollo::cyber::NullType> > const&)::{lambda()#1}::operator()() const::{lambda()#1}>::_M_invoke(std::_Any_data const&) (__functor=...) at 
+/usr/include/c++/4.8/functional:2071
+#13 0x00007f8c5f5b86e8 in std::function<void ()>::operator()() const (this=0x205f1160) at /usr/include/c++/4.8/functional:2471
+#14 0x00007f8c57560cbc in apollo::cyber::croutine::CRoutine::Run (this=0x205f1148) at ./cyber/croutine/croutine.h:143
+#15 0x00007f8c5755ff55 in apollo::cyber::croutine::(anonymous namespace)::CRoutineEntry (arg=0x205f1148) a
+ ———————————————— 
+版权声明：本文为CSDN博主「知行合一2018」的原创文章，遵循CC 4.0 by-sa版权协议，转载请附上原文出处链接及本声明。
+原文链接：https://blog.csdn.net/davidhopper/article/details/89360385
+
+
+
+2. 在Docker内部使用GDB调试
+gdb -q bazel-bin/modules/map/relative_map/navigation_lane_test
+1
+进入GDB调试界面后，使用l命令查看源代码，使用b 138在源代码第138行（可根据需要修改为自己所需的代码位置 ）设置断点，使用r命令运行navigation_lane_test程序，进入断点暂停后，使用p navigation_lane_查看当前变量值（可根据需要修改为其他变量名），使用n单步调试一条语句，使用s单步调试进入函数内部，使用c继续执行后续程序。如果哪个部分测试通不过，调试信息会立刻告诉你具体原因，可使用bt查看当前调用堆栈。
+ ———————————————— 
+版权声明：本文为CSDN博主「知行合一2018」的原创文章，遵循CC 4.0 by-sa版权协议，转载请附上原文出处链接及本声明。
+原文链接：https://blog.csdn.net/davidhopper/article/details/82589722

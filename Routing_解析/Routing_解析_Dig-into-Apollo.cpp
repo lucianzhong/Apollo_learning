@@ -217,9 +217,7 @@ https://zhuanlan.zhihu.com/p/65533164
 	  InitNodeCost(lane, routingconfig, node);
 }
 
-
-
-
+	// 1. 初始化哪些节点信息呢？
 	void InitNodeInfo(const Lane& lane, const std::string& road_id, Node* const node) {
 	  double lane_length = GetLaneLength(lane);
 	  node->set_lane_id(lane.id().id());
@@ -230,31 +228,22 @@ https://zhuanlan.zhihu.com/p/65533164
 	  node->set_length(lane_length);
 	  node->mutable_central_curve()->CopyFrom(lane.central_curve());
 	  node->set_is_virtual(true);
-	  if (!lane.has_junction_id() ||
-	      lane.left_neighbor_forward_lane_id_size() > 0 ||
-	      lane.right_neighbor_forward_lane_id_size() > 0) {
+	  if (!lane.has_junction_id() || lane.left_neighbor_forward_lane_id_size() > 0 || lane.right_neighbor_forward_lane_id_size() > 0) {
 	    node->set_is_virtual(false);
 	  }
 	}
 
 
-
-		void InitNodeCost(const Lane& lane, const RoutingConfig& routing_config, Node* const node) {
+	// 2. 如何计算节点的代价呢？
+	void InitNodeCost(const Lane& lane, const RoutingConfig& routing_config, Node* const node) {
 	  double lane_length = GetLaneLength(lane);
-	  double speed_limit = (lane.has_speed_limit()) ? lane.speed_limit()
-	                                                : routing_config.base_speed();
-	  double ratio = (speed_limit >= routing_config.base_speed())
-	                     ? (1 / sqrt(speed_limit / routing_config.base_speed()))
-	                     : 1.0;
+	  double speed_limit = (lane.has_speed_limit()) ? lane.speed_limit() : routing_config.base_speed();
+	  double ratio = (speed_limit >= routing_config.base_speed()) ? (1 / sqrt(speed_limit / routing_config.base_speed())): 1.0;
 	  // 1. 根据道路长度和速度限制来计算代价
 	  double cost = lane_length * ratio;
 	  if (lane.has_turn()) {
 	    if (lane.turn() == Lane::LEFT_TURN) {
-
-	    	// 2. 掉头代价 > 左转代价 > 右转的代价
-		    // left_turn_penalty: 50.0
-		    // right_turn_penalty: 20.0
-		    // uturn_penalty: 100.0
+	    	// 2. 掉头代价 > 左转代价 > 右转的代价  // left_turn_penalty: 50.0   // right_turn_penalty: 20.0   // uturn_penalty: 100.0
 	      cost += routing_config.left_turn_penalty();
 	    } else if (lane.turn() == Lane::RIGHT_TURN) {
 	      cost += routing_config.right_turn_penalty();
@@ -267,14 +256,11 @@ https://zhuanlan.zhihu.com/p/65533164
 
 
 
-18.
-	创建节点的边
+6.	创建节点的边
+
  apollo/modules/routing/topo_creator/edge_creator.cc
 
-
- void GetPbEdge(const Node& node_from, const Node& node_to,
-               const Edge::DirectionType& type,
-               const RoutingConfig& routing_config, Edge* edge) {
+ void GetPbEdge( const Node& node_from, const Node& node_to, const Edge::DirectionType& type, const RoutingConfig& routing_config, Edge* edge) {
 	  // 设置起始，终止车道和类型
 	  edge->set_from_lane_id(node_from.lane_id());
 	  edge->set_to_lane_id(node_to.lane_id());
@@ -283,8 +269,7 @@ https://zhuanlan.zhihu.com/p/65533164
 	  // 默认代价为0，即直接向前开的代价
 	  edge->set_cost(0.0);
 	  if (type == Edge::LEFT || type == Edge::RIGHT) {
-	    const auto& target_range =
-	        (type == Edge::LEFT) ? node_from.left_out() : node_from.right_out();
+	    const auto& target_range = (type == Edge::LEFT) ? node_from.left_out() : node_from.right_out();
 	    double changing_area_length = 0.0;
 	    for (const auto& range : target_range) {
 	      changing_area_length += range.end().s() - range.start().s();
@@ -292,8 +277,7 @@ https://zhuanlan.zhihu.com/p/65533164
 	    double ratio = 1.0;
 	    // 计算代价
 	    if (changing_area_length < routing_config.base_changing_length()) {
-	      ratio = std::pow(
-	          changing_area_length / routing_config.base_changing_length(), -1.5);
+	      ratio = std::pow( changing_area_length / routing_config.base_changing_length(), -1.5 );
 	    }
 	    edge->set_cost(routing_config.change_penalty() * ratio);
 	  }
@@ -301,15 +285,13 @@ https://zhuanlan.zhihu.com/p/65533164
 
 
 我们可以看下edge cost的曲线，因为"changing_area_length / routing_config.base_changing_length() < 1"，这个函数最小值为1，最大值为无穷。
-
-
 到这里制作routing_map的流程就结束了，建图的主要目的是把base结构的map转换为graph结构的map，从而利用图结构来查找最佳路径，下面会分析如何通过routing_map得到规划好的路线。
 
 
 
 
 
-19. Routing主流程
+7. Routing主流程
 
 	把一些主要的流程摘要如下：
 	1.在cyber中注册component，接收request请求，响应请求结果response
@@ -322,17 +304,16 @@ https://zhuanlan.zhihu.com/p/65533164
 下面在结合具体的流程进行分析，这里主要要弄清楚2点：1.为什么要生成子图？ 2.如何通过astar算法查找最优路径？
 
 
-20. apollo/modules/routing/routing_component.cc
+8. apollo/modules/routing/routing_component.cc
 
 	apollo的功能被划分为各个模块，启动时候由cyber框架根据模块间的依赖顺序加载(每个模块的dag文件定义了依赖顺序)，每次开始查看一个模块时，都是从component文件开始。
-	routing模块都按照cyber的模块申明和注册，cyber框架负责调用Init进行初始化，并且收到消息时候触发Proc执行
+	启动时候由cyber框架根据模块间的依赖顺序加载(每个模块的dag文件定义了依赖顺序)，每次开始查看一个模块时，都是从component文件开始,	routing模块都按照cyber的模块申明和注册，cyber框架负责调用Init进行初始化，并且收到消息时候触发Proc执行
 	从上面的分析可以看出，"RoutingComponent"模块实现的主要功能:
 
 	实现"Init"和"Proc"函数
 	接收"RoutingRequest"消息，输出"RoutingResponse"响应。
 
-
-
+	routing模块都按照cyber的模块申明和注册，cyber框架负责调用Init进行初始化，并且收到消息时候触发Proc执行。
 
 	namespace apollo {
 	namespace routing {
@@ -367,33 +348,28 @@ https://zhuanlan.zhihu.com/p/65533164
 
 
 
+
 	bool RoutingComponent::Init() {
 		// 设置消息qos，控制流量，创建消息发布response_writer_
 	  apollo::cyber::proto::RoleAttributes attr;
 	  attr.set_channel_name(FLAGS_routing_response_topic);
 	  auto qos = attr.mutable_qos_profile();
 	  qos->set_history(apollo::cyber::proto::QosHistoryPolicy::HISTORY_KEEP_LAST);
-	  qos->set_reliability(
-	      apollo::cyber::proto::QosReliabilityPolicy::RELIABILITY_RELIABLE);
-	  qos->set_durability(
-	      apollo::cyber::proto::QosDurabilityPolicy::DURABILITY_TRANSIENT_LOCAL);
+	  qos->set_reliability(apollo::cyber::proto::QosReliabilityPolicy::RELIABILITY_RELIABLE);
+	  qos->set_durability(apollo::cyber::proto::QosDurabilityPolicy::DURABILITY_TRANSIENT_LOCAL);
 	  response_writer_ = node_->CreateWriter<RoutingResponse>(attr);
 
 	  apollo::cyber::proto::RoleAttributes attr_history;
 	  attr_history.set_channel_name(FLAGS_routing_response_history_topic);
 	  auto qos_history = attr_history.mutable_qos_profile();
-	  qos_history->set_history(
-	      apollo::cyber::proto::QosHistoryPolicy::HISTORY_KEEP_LAST);
-	  qos_history->set_reliability(
-	      apollo::cyber::proto::QosReliabilityPolicy::RELIABILITY_RELIABLE);
-	  qos_history->set_durability(
-	      apollo::cyber::proto::QosDurabilityPolicy::DURABILITY_TRANSIENT_LOCAL);
+	  qos_history->set_history(apollo::cyber::proto::QosHistoryPolicy::HISTORY_KEEP_LAST);
+	  qos_history->set_reliability(apollo::cyber::proto::QosReliabilityPolicy::RELIABILITY_RELIABLE);
+	  qos_history->set_durability(apollo::cyber::proto::QosDurabilityPolicy::DURABILITY_TRANSIENT_LOCAL);
 
 	  // 历史消息发布，和response_writer_类似
 	  response_history_writer_ = node_->CreateWriter<RoutingResponse>(attr_history);
 	  // 创建定时器
-	  std::weak_ptr<RoutingComponent> self =
-	      std::dynamic_pointer_cast<RoutingComponent>(shared_from_this());
+	  std::weak_ptr<RoutingComponent> self =  std::dynamic_pointer_cast<RoutingComponent>(shared_from_this());
 	  timer_.reset(new ::apollo::cyber::Timer(
 	      FLAGS_routing_response_history_interval_ms,
 	      [self, this]() {
@@ -414,10 +390,7 @@ https://zhuanlan.zhihu.com/p/65533164
 	  return routing_.Init().ok() && routing_.Start().ok();
 	}
 
-
-
-
-
+// 接下来当routing模块收到routing_request时，会触发"Proc()"，返回routing_response:
 	bool RoutingComponent::Proc(const std::shared_ptr<RoutingRequest>& request) {
 	  auto response = std::make_shared<RoutingResponse>();
 	   // 响应routing_请求
@@ -436,7 +409,7 @@ https://zhuanlan.zhihu.com/p/65533164
 
 
 
-21. Routing类
+9. Routing类
 
 	//Routing的初始化函数
 	apollo::common::Status Routing::Init() {
@@ -447,12 +420,10 @@ https://zhuanlan.zhihu.com/p/65533164
 	  navigator_ptr_.reset(new Navigator(routing_map_file));
 
 	  CHECK( cyber::common::GetProtoFromFile(FLAGS_routing_conf_file, &routing_conf_))    << "Unable to load routing conf file: " + FLAGS_routing_conf_file;
-
 	  AINFO << "Conf file: " << FLAGS_routing_conf_file << " is loaded.";
 
 	  // 读取地图，用来查找routing request请求的点距离最近的lane，
-  // 并且返回对应的lane id，这里很好理解，比如你在小区里面，需要打车，
-  // 需要找到最近的乘车点，说直白点，就是找到最近的路
+  // 并且返回对应的lane id，这里很好理解，比如你在小区里面，需要打车，需要找到最近的乘车点，说直白点，就是找到最近的路
 	  hdmap_ = apollo::hdmap::HDMapUtil::BaseMapPtr();
 
 	  CHECK(hdmap_) << "Failed to load map file:" << apollo::hdmap::BaseMapFile();
@@ -461,7 +432,7 @@ https://zhuanlan.zhihu.com/p/65533164
 	}
 
 
-
+	// 之后会执行"Process"主流程
 	//"Process"主流程
 	bool Routing::Process(const std::shared_ptr<RoutingRequest>& routing_request, RoutingResponse* const routing_response) {
 	  CHECK_NOTNULL(routing_response);
@@ -473,35 +444,201 @@ https://zhuanlan.zhihu.com/p/65533164
 	  if (!navigator_ptr_->SearchRoute(fixed_request, routing_response)) {
 	    AERROR << "Failed to search route with navigator.";
 
-	    monitor_logger_buffer_.WARN("Routing failed! " +
-	                                routing_response->status().msg());
+	    monitor_logger_buffer_.WARN("Routing failed! " + routing_response->status().msg());
 	    return false;
 	  }
 
 	  monitor_logger_buffer_.INFO("Routing success!");
 	  return true;
 	}
-
-
-
-
 	上述的过程总结一下就是，首先读取routing_map并初始化Navigator类，接着遍历routing_request，因为routing_request请求为一个个的点，所以先查看routing_request的点是否在路上，不在路上则找到最近的路，并且补充信息（不在路上的点则过不去），
 	最后调用"navigator_ptr_->SearchRoute"返回routing响应。
 
 
 
-22. Navigator类
+10. Navigator类
+
+	Navigator初始化
+
+	bool Navigator::Init( const RoutingRequest& request, const TopoGraph* graph, std::vector<const TopoNode*>* const way_nodes, std::vector<double>* const way_s) {
+	  Clear();
+	  if (!GetWayNodes(request, graph_.get(), way_nodes, way_s)) {  // 获取routing请求，对应图中的节点
+	    AERROR << "Failed to find search terminal point in graph!";
+	    return false;
+	  }
+	  black_list_generator_->GenerateBlackMapFromRequest(request, graph_.get(), &topo_range_manager_);    // 根据请求生成对应的黑名单lane
+	  return true;
+	}
+
+	 在routing请求中可以指定黑名单路和车道，这样routing请求将不会计算这些车道。应用场景是需要避开拥堵路段，这需要能够根据情况实时请求，在routing_request中可以设置黑名单也刚好可以满足上面的需求，如果直接把黑名单路段固定，则是一个比较蠢的设计。
+
+
+	剩下的一些过程比较简单，我们直接看主函数"SearchRouteByStrategy":
+
+	bool Navigator::SearchRouteByStrategy( const TopoGraph* graph, const std::vector<const TopoNode*>& way_nodes, const std::vector<double>& way_s, std::vector<NodeWithRange>* const result_nodes) const {
+	  std::unique_ptr<Strategy> strategy_ptr;
+	  strategy_ptr.reset(new AStarStrategy(FLAGS_enable_change_lane_in_result)); // 通过Astar算法来查找路径
+
+	  result_nodes->clear();
+	  std::vector<NodeWithRange> node_vec;
+	   // 编译routing_request节点
+	  for (size_t i = 1; i < way_nodes.size(); ++i) {
+	    const auto* way_start = way_nodes[i - 1];
+	    const auto* way_end = way_nodes[i];
+	    double way_start_s = way_s[i - 1];
+	    double way_end_s = way_s[i];
+
+	    TopoRangeManager full_range_manager = topo_range_manager_;
+	     // 添加黑名单，这里主要是把车道根据起点和终点做分割。
+	    black_list_generator_->AddBlackMapFromTerminal( way_start, way_end, way_start_s, way_end_s, &full_range_manager);
+
+	     // 因为对车道做了分割，这里会创建子图，比如一个车道分成2个子节点， 2个子节点会创建一张子图。
+	    SubTopoGraph sub_graph(full_range_manager.RangeMap());
+
+	     // 获取起点
+	    const auto* start = sub_graph.GetSubNodeWithS(way_start, way_start_s);
+	    if (start == nullptr) {
+	      AERROR << "Sub graph node is nullptr, origin node id: " << way_start->LaneId() << ", s:" << way_start_s;
+	      return false;
+	    }
+	     // 获取终点
+	    const auto* end = sub_graph.GetSubNodeWithS(way_end, way_end_s);
+	    if (end == nullptr) {
+	      AERROR << "Sub graph node is nullptr, origin node id: " << way_end->LaneId() << ", s:" << way_end_s;
+	      return false;
+	    }
+
+		// 通过Astar查找最优路径
+	    std::vector<NodeWithRange> cur_result_nodes;
+	    if (!strategy_ptr->Search(graph, &sub_graph, start, end, &cur_result_nodes)) {
+	      AERROR << "Failed to search route with waypoint from " << start->LaneId()  << " to " << end->LaneId();
+	      return false;
+	    }
+
+	     // 保存结果到node_vec
+	    node_vec.insert(node_vec.end(), cur_result_nodes.begin(),  cur_result_nodes.end());
+	  }
+
+	   // 合并Route
+	  if (!MergeRoute(node_vec, result_nodes)) {
+	    AERROR << "Failed to merge route.";
+	    return false;
+	  }
+	  return true;
+	}
 
 
 
+11. 子节点
+	下面我们把子图的概念讲解一下，"AddBlackMapFromTerminal"中会把节点(这里的节点就是lane)切分，切分之后的数据保存在"TopoRangeManager"中，而"SubTopoGraph"会根据"TopoRangeManager"中的数据初始化子图。
+	我们先理解下子节点的概念，节点就是一条lane，而子节点是对lane做了切割，把一条lane根据黑名单区域，生成几个子节点。
+
+
+	节点的切分是根据TopoRangeManager生成好的区间，然后进行切分生成子节点。我们先看下如何生成"TopoRangeManager"，
+	在"AddBlackMapFromTerminal"**输入参数为routing_request的开始lane，结束的lane，开始位置，结束位置，输出参数为分段好的区间(range)**，在"range_map_"中保存lane和lane中range的关系，其中key为节点，value为区间(range)
+
+	GenerateBlackMapFromRequest - 通过request请求传入黑名单lane和road，每次直接屏蔽一整条road或者lane。
+	AddBlackMapFromTerminal - 虽然range_manager支持传入range，但是这种场景只是针对routing_request传入的点对lane做切割，方便计算，每次切割的区间的起点和终点重合，是一个特殊场景，后续应该有用到比如在一条lane里，有某一段不能行驶的功能。
+
+
+	apollo/modules/routing/core/black_list_range_generator.cc
+
+void BlackListRangeGenerator::AddBlackMapFromTerminal( const TopoNode* src_node, const TopoNode* dest_node, double start_s, double end_s, TopoRangeManager* const range_manager) const {
+	  double start_length = src_node->Length();
+	  double end_length = dest_node->Length();
+	  if (start_s < 0.0 || start_s > start_length) {
+	    AERROR << "Illegal start_s: " << start_s << ", length: " << start_length;
+	    return;
+	  }
+	  if (end_s < 0.0 || end_s > end_length) {
+	    AERROR << "Illegal end_s: " << end_s << ", length: " << end_length;
+	    return;
+	  }
+
+	  double start_cut_s = MoveSBackward(start_s, 0.0); 
+	  range_manager->Add(src_node, start_cut_s, start_cut_s);// 注意这里range的起点和终点是同一个点，为routing的起点
+	  // 把平行的节点也按照比例做相同的切分
+	  AddBlackMapFromOutParallel(src_node, start_cut_s / start_length, range_manager);
+	  // 注意这里range的起点和终点是同一个点，为routing的终点
+	  double end_cut_s = MoveSForward(end_s, end_length);
+	  range_manager->Add(dest_node, end_cut_s, end_cut_s);
+	  AddBlackMapFromInParallel(dest_node, end_cut_s / end_length, range_manager);
+	   // 排序并且合并
+	  range_manager->SortAndMerge();
+	}
 
 
 
+apollo/modules/routing/graph/sub_topo_graph.cc
+	void GetSortedValidRange( const TopoNode* topo_node,
+	                         const std::vector<NodeSRange>& origin_range,
+	                         std::vector<NodeSRange>* valid_range) {
+	  std::vector<NodeSRange> block_range;
+	  MergeBlockRange(topo_node, origin_range, &block_range);
+	  double start_s = topo_node->StartS();
+	  double end_s = topo_node->EndS();
+	  std::vector<double> all_value;
+	   // 添加node起点，边界和node终点
+	  all_value.push_back(start_s);
+
+	  for (const auto& range : block_range) {
+	    all_value.push_back(range.StartS());
+	    all_value.push_back(range.EndS());
+	  }
+	  all_value.push_back(end_s);
+	    // **核心在这里，每次i+2，即跳过balck_range，生成valid_range*
+	  for (size_t i = 0; i < all_value.size(); i += 2) {
+	    NodeSRange new_range(all_value[i], all_value[i + 1]);
+	    valid_range->push_back(std::move(new_range));
+	  }
+	}
 
 
 
+	SubTopoGraph::SubTopoGraph( const std::unordered_map<const TopoNode*, std::vector<NodeSRange> >& black_map ) {
+	  std::vector<NodeSRange> valid_range;
+	  for (const auto& map_iter : black_map) {
+	    valid_range.clear();
+	    GetSortedValidRange(map_iter.first, map_iter.second, &valid_range);
+	     // 生成子节点
+	    InitSubNodeByValidRange(map_iter.first, valid_range);
+	  }
+
+	  for (const auto& map_iter : black_map) {
+	  	  // 生成子边
+	    InitSubEdge(map_iter.first);
+	  }
+	  for (const auto& map_iter : black_map) {
+	    AddPotentialEdge(map_iter.first);
+	  }
+	}
 
 
+由于Graph节点中已经有边的信息，因此原先的Graph中的边的信息实际上已经保存在节点中了，最后Astar实际上只用到了子图的信息，因为节点有自己边的信息。subgraph的核心是通过边找到子边，如果节点不存在子节点，那么返回原先的边，
+通过该函数可以同时找到边和子边，这样节点和子节点都可以找到了。我们下面重点分析下"GetSubInEdgesIntoSubGraph"
+
+	void SubTopoGraph::GetSubInEdgesIntoSubGraph( const TopoEdge* edge,std::unordered_set<const TopoEdge*>* const sub_edges) const {
+		  const auto* from_node = edge->FromNode();
+		  const auto* to_node = edge->ToNode();
+		  std::unordered_set<TopoNode*> sub_nodes;
+		  // 如果起点是子节点，终点是子节点，或者终点没有子节点，返回边
+  // TODO: **这里传入的是edge，根本不可能是子节点？**
+		  if (from_node->IsSubNode() || to_node->IsSubNode() ||
+		      !GetSubNodes(to_node, &sub_nodes)) {
+		    sub_edges->insert(edge);
+		    return;
+		  }
+		  // 如果终点有子节点，则返回所有的子边
+		  for (const auto* sub_node : sub_nodes) {
+		    for (const auto* in_edge : sub_node->InFromAllEdge()) {
+		      if (in_edge->FromNode() == from_node) {
+		        sub_edges->insert(in_edge);
+		      }
+		    }
+		  }
+		}
+
+关于子图的分析就结束了，子图主要是针对一条lane切分为几个子节点的情况，根据切分好的子节点从新生成一张图，比原先根据routing_map建立的图有更细的粒度
 
 
 
@@ -511,11 +648,7 @@ Reference:
 https://github.com/YannZyl/Apollo-Note/blob/master/docs/planning/planning_arch.md
 
 
-
-
-
-
-1. apollo/modules/routing/proto/routing.proto
+12. apollo/modules/routing/proto/routing.proto
 
 	Planning和Routing模块的核心数据结构。其中包括路由查询RoutingRequest与路由响应RoutingResponse。
 
@@ -588,3 +721,8 @@ RoadSegment类型包含了repeated Passage，这意味着，一个RoadSegment中
 
 
 
+13. 调试工具
+	在routing/tools目录实现了如下3个功能：
+	routing_cast.cc // 定时发送routing response响应
+	routing_dump.cc // 保存routing请求
+	routing_tester.cc // 定时发送routing request请求
