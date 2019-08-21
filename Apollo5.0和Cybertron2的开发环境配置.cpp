@@ -5,17 +5,18 @@
 	cybertron2.0 environment
 		apollo: 5.0
 		windows: false
+		port:24800 // default
 		port: 8889
 		name: apollo5
 
 2. update ubuntu16 docker on rancher
 	volume
-		apollo5_cache-data_20e43:/root/.cache   // Add Volume   // In apollo5-apollo-ubuntu14-1,  volume: apollo5_cache-data_20e43 	/root/.cache, add to ubuntu16, upgrade add volume: apollo5_cache-data_20e43 	/root/.cache
+		apollo5_cache-data_20e43:/root/.cache   // Add Volume   // In apollo5-apollo-ubuntu14-1,  volume: apollo5_cache-data_20e43 	/root/.cache, add to ubuntu16, upgrade add volume: apollo5_cache-data_20e43 	/root/.cache  //  Finsh update,the docekr exec need to start again
 
 		use name: root
 
-3. Need to download Cybertron2 manually   // git config --global credential.helper store   // repeatedly inputs of password
-
+3. Need to download Cybertron2 manually   // ubuntu16 // git config --global credential.helper store   // repeatedly inputs of password
+										// Download Cybertron, copy file in Cyberstron to Cybertron2 // sudo cp -rf Cybertron/* Cybertron2/
 
 4. rm submodule /Cybertron2/apollo
 	then link /apollo to /Cybertron2/apollo    // root@apollo5-cybertron2-ubuntu16-1:/Cybertron2# ln -s /apollo /Cybertron2/apollo
@@ -32,9 +33,9 @@
 6. build cybertron and apollo cyber bridge
 
 	root@apollo5-cybertron2-ubuntu16-1:/Cybertron2/Modules/Foundation/Build#
-		./rebuild_debug.sh
+		sudo ./rebuild_debug.sh
 	root@apollo5-cybertron2-ubuntu16-1:/Cybertron2/Modules/BridgeApollo/CybertronBridgeApolloCyber#   // need the built  ../../../../apollo/bazel-bin/CyberBridge/libApolloCyber.so
-		./rebuild_debug.sh
+		sudo ./rebuild_debug.sh
 
 
 7. data log location
@@ -165,3 +166,24 @@ cyber_channel echo /apollo/perception/obstacles
 // 回放和暂停
 root@apollo5-apollo-ubuntu14-1:/apollo# cyber_recorder play -f 20190819115806.record.00002
 
+
+
+
+6.   检查现有文件监控数目
+cat /proc/sys/fs/inotify/max_user_watches
+
+修改文件监控数目
+综合考虑实际需监控文件的数目和内存消耗情况，我将新的文件监控数目设置为：81920，即原来监控数目的10倍。我使用vi对配置文件进行编辑：
+
+sudo vi /etc/sysctl.conf
+
+
+在该配置文件的最后一行加上下述语句：
+
+fs.inotify.max_user_watches=54288
+1
+3. 让配置文件中的新文件监控数目生效
+sudo sysctl -p
+
+
+重新打开VSCode，只要当前文件夹内文件数目不超过81920个，就不会再出现警告信息了。

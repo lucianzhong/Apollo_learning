@@ -243,3 +243,29 @@ DEFINE_string(base_map_filename, "base_map.bin|base_map.xml|base_map.txt|base_ma
 	
 root@apollo5-apollo-ubuntu14-1:/apollo# find -name "kk.sh"
 ./scripts/kk.sh
+
+
+
+11. 
+// cyber_recorder
+
+// 录制
+root@apollo5-apollo-ubuntu14-1:/apollo# cyber_recorder record -a
+// 查看录制信息
+root@apollo5-apollo-ubuntu14-1:/apollo# cyber_recorder info 20190819115806.record.00002  
+
+// 回放和暂停
+root@apollo5-apollo-ubuntu14-1:/apollo# cyber_recorder play -f 20190819115806.record.00002
+
+
+// 查看channel
+root@apollo5-apollo-ubuntu14-1:/apollo# cyber_channel list
+
+// 查看channel的内容
+cyber_channel echo /apollo/planning
+cyber_channel echo /apollo/perception/obstacles
+
+
+// 回放和暂停
+root@apollo5-apollo-ubuntu14-1:/apollo# cyber_recorder play -f 20190819115806.record.00002
+

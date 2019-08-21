@@ -11,7 +11,7 @@ class CyberWriterPointCloud
 {
   public:
 	 CyberWriterPointCloud();
-	 ~CyberWriterPointCloud();
+	 ~CyberWriterPointCloud() = default;
 	 void publish(int sequence, int width, int height, int step, const char *data) const;
 
   private:

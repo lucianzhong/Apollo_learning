@@ -294,7 +294,7 @@ bool PlanningComponent::Init() {
 
 
 
-22. // 场景实现
+8. // 场景实现
 
 	//ScenarioManager：场景管理器类。负责注册，选择和创建Scenario
 	/modules/planning/scenarios/scenario_manager.cc 
@@ -369,70 +369,40 @@ bool PlanningComponent::Init() {
 	  repeated StageConfig stage_config = 7;
 	}
 
-
-
 	// 场景注册
 	/modules/planning/scenarios/scenario_manager.cc 
 	前面我们已经提到，ScenarioManager负责场景的注册。实际上，注册的方式就是读取配置文件
 
 	void ScenarioManager::RegisterScenarios() {
 	  // lane_follow
-	  CHECK(Scenario::LoadConfig(FLAGS_scenario_lane_follow_config_file,
-	                             &config_map_[ScenarioConfig::LANE_FOLLOW]));
-
+	  CHECK(Scenario::LoadConfig( FLAGS_scenario_lane_follow_config_file, &config_map_[ScenarioConfig::LANE_FOLLOW]));
 	  // bare_intersection
-	  CHECK(Scenario::LoadConfig(
-	      FLAGS_scenario_bare_intersection_unprotected_config_file,
-	      &config_map_[ScenarioConfig::BARE_INTERSECTION_UNPROTECTED]));
-
+	  CHECK(Scenario::LoadConfig( FLAGS_scenario_bare_intersection_unprotected_config_file, &config_map_[ScenarioConfig::BARE_INTERSECTION_UNPROTECTED]));
 	  // park_and_go
-	  CHECK(Scenario::LoadConfig(FLAGS_scenario_park_and_go_config_file,
-	                             &config_map_[ScenarioConfig::PARK_AND_GO]));
-
+	  CHECK(Scenario::LoadConfig( FLAGS_scenario_park_and_go_config_file, &config_map_[ScenarioConfig::PARK_AND_GO]));
 	  // pull_over
-	  CHECK(Scenario::LoadConfig(FLAGS_scenario_pull_over_config_file,
-	                             &config_map_[ScenarioConfig::PULL_OVER]));
-
+	  CHECK(Scenario::LoadConfig( FLAGS_scenario_pull_over_config_file, &config_map_[ScenarioConfig::PULL_OVER]));
 	  // stop_sign
-	  CHECK(Scenario::LoadConfig(
-	      FLAGS_scenario_stop_sign_unprotected_config_file,
-	      &config_map_[ScenarioConfig::STOP_SIGN_UNPROTECTED]));
-
+	  CHECK(Scenario::LoadConfig( FLAGS_scenario_stop_sign_unprotected_config_file, &config_map_[ScenarioConfig::STOP_SIGN_UNPROTECTED]));
 	  // traffic_light
-	  CHECK(Scenario::LoadConfig(
-	      FLAGS_scenario_traffic_light_protected_config_file,
-	      &config_map_[ScenarioConfig::TRAFFIC_LIGHT_PROTECTED]));
-	  CHECK(Scenario::LoadConfig(
-	      FLAGS_scenario_traffic_light_unprotected_left_turn_config_file,
-	      &config_map_[ScenarioConfig::TRAFFIC_LIGHT_UNPROTECTED_LEFT_TURN]));
-	  CHECK(Scenario::LoadConfig(
-	      FLAGS_scenario_traffic_light_unprotected_right_turn_config_file,
-	      &config_map_[ScenarioConfig::TRAFFIC_LIGHT_UNPROTECTED_RIGHT_TURN]));
-
+	  CHECK(Scenario::LoadConfig( FLAGS_scenario_traffic_light_protected_config_file, &config_map_[ScenarioConfig::TRAFFIC_LIGHT_PROTECTED]));
+	  CHECK(Scenario::LoadConfig( FLAGS_scenario_traffic_light_unprotected_left_turn_config_file, &config_map_[ScenarioConfig::TRAFFIC_LIGHT_UNPROTECTED_LEFT_TURN]));
+	  CHECK(Scenario::LoadConfig( FLAGS_scenario_traffic_light_unprotected_right_turn_config_file, &config_map_[ScenarioConfig::TRAFFIC_LIGHT_UNPROTECTED_RIGHT_TURN]));
 	  // valet parking
-	  CHECK(Scenario::LoadConfig(FLAGS_scenario_valet_parking_config_file,
-	                             &config_map_[ScenarioConfig::VALET_PARKING]));
+	  CHECK(Scenario::LoadConfig(FLAGS_scenario_valet_parking_config_file, &config_map_[ScenarioConfig::VALET_PARKING]));
 	}
-
-
-
-
 
 	// 场景确定
 	/modules/planning/scenarios/scenario_manager.cc 
 
 	void ScenarioManager::Update(const common::TrajectoryPoint& ego_point, const Frame& frame) { //确定场景的依据是Frame数据
 	  CHECK(!frame.reference_line_info().empty());
-
 	  Observe(frame);
-
 	  ScenarioDispatch(ego_point, frame);
 	}
 
 
-
-
-23. Frenet坐标系:
+9. Frenet坐标系:
 	最主要的原因是因为大部分的道路都不是笔直的，而是具有一定弯曲度的弧线
 	相比于笛卡尔坐标系，Frenet坐标系明显地简化了问题。因为在公路行驶中，我们总是能够简单的找到道路的参考线（即道路的中心线），那么基于参考线的位置的表示就可以简单的使用纵向距离（即沿着道路方向的距离）和横向距离（即偏离参考线的距离）来描述
 
@@ -440,424 +410,223 @@ bool PlanningComponent::Init() {
 
 
 
-24.  ReferenceLine
-	参考线是整个决策规划算法的基础。从前面的内容我们也看到了，在Planning模块的每个计算循环中，会先生成ReferencePath，然后在这个基础上进行后面的处理。例如：把障碍物投影到参考线上。
+10.  ReferenceLine
+	参考线是整个决策规划算法的基础。从前面的内容我们也看到了，在Planning模块的每个计算循环中，会先生成ReferencePath，然后在这个基础上进行后面的处理。例如：把障碍物投影到参考线上
 
-	/modules/planning/reference_line/reference_line_provider.h
-
-	bool GetReferenceLines(std::list<ReferenceLine>* reference_lines, std::list<hdmap::RouteSegments>* segments);
-
-	planning涉及到三个模块:
-	routing模块，这部分内容已经在Routing模块一文中讲解过，本文不再赘述。
-	pnc_map模块：负责读取和处理Routing搜索结果。
-	planning模块：根据Routing结果和车辆的实时状态（包括周边环境）生成参考线和轨迹。
+	// ReferenceLineProvider:ReferenceLine由ReferenceLineProvider专门负责生成
 
 
-	在Planning模块中有以下三个数据结构将是本文关注的重点：
+	// 创建ReferenceLine: ReferenceLine是在StdPlanning::InitFrame函数中生成的
+	modules/planning/on_lane_planning.cc
 
-	ReferenceLine：原始参考线，源码位于planning/reference_line/目录下。根据Routing的搜索结果生成。
-
-	ReferenceLineInfo：源码位于planning/common/目录下。Planning实现中，逻辑计算的基础数据结构，很多操作都会在这个数据结构上进行（例如：交通规则逻辑，障碍物投影，路径优化，速度决策等）。本文中的“参考线”一词将不区分ReferenceLine和ReferenceLineInfo两个结构。
-
-	Trajectory：下文中我们将看到，有好几个结构用来描述轨迹。它们在不同的场合下使用。这其中，ADCTrajectory是Planning模块的输出。它是Planning模块一次计算循环中，处理了所有逻辑的最终结果，包含了车辆行驶需要的所有信息。因此，这个数据将直接影响到自动驾驶车辆的行车行为。
-
-
-
-
-25. 决策规划模块负责生成车辆的行驶轨迹。要做到这一点，决策规划模块需要从宏观到局部经过三个层次来进行决策:
-
-	1.第一个层次是Routing的搜索结果。Routing模块的输入是若干个按顺序需要达到的途径点（也可能只有一个起点和终点）。
-	  Routing模块根据地图的拓扑结构搜索出可达的完整路线来，这个路线的长度可能是几公里甚至几百公里。因此这个是最为宏观的数据。另外，Routing的搜索结果是相对固定的。在没有障碍物的情况下，车辆会一直沿着原先获取到的Routing路线行驶。
-	  只有当车辆驶出了原先规划的路线之外（例如：为了避障），才会重新发送请求给Routing模块，以重新计算路线。
-
-	2. 第二个层次就是参考线。决策规划模块会实时的根据车辆的具体位置来计算参考线。参考线的计算会以Routing的路线为基础。但同时，参考线会考虑车辆周边的动态信息，例如：障碍物，交通规则等。参考线是包含车辆所在位置周边一定的范围，通常是几百米的长度。
-	   Routing结果，它是较为局部的数据。
-
-	3.层次是轨迹。轨迹是决策规划模块的最终输出结果。它的依据是参考线。在同一时刻，参考线可能会有多条，例如：在变道的时候，自车所在车道和目标车道都会有一条参考线。而轨迹，是在所有可能的结果中，综合决策和优化的结果，最终的唯一结果。
-	  因此它是更为具体和局部的数据。轨迹不仅仅包含了车辆的路线，还包含了车辆行驶这条路线时的详细状态，例如：车辆的方向，速度，加速度等等。 
-
-
-	  在Planning模块一文中我们已经提到：参考线是整个决策规划算法的基础。在Planning模块的每个计算循环中，都会先生成参考线，然后在这个基础上进行后面的处理，例如：交通规则逻辑，障碍物投影，路径优化，速度决策等等。可以说，参考线贯穿了整个Planning模块的实现。
+	Status OnLanePlanning::InitFrame( const uint32_t sequence_num, const TrajectoryPoint& planning_start_point, const VehicleState& vehicle_state) {
+	  frame_.reset( new Frame( sequence_num, local_view_, planning_start_point, vehicle_state, reference_line_provider_.get()));
+	    if (frame_ == nullptr) {
+		    return Status(ErrorCode::PLANNING_ERROR, "Fail to init frame: nullptr.");
+		  }
+		  std::list<ReferenceLine> reference_lines;
+		  std::list<hdmap::RouteSegments> segments;
+		  if (!reference_line_provider_->GetReferenceLines(&reference_lines, &segments)) {
+		    std::string msg = "Failed to create reference line";
+		    return Status(ErrorCode::PLANNING_ERROR, msg);
+		  }
+		  DCHECK_EQ(reference_lines.size(), segments.size());
 
 
 
-26. pnc_map
-	pnc全称是Planning And Control。这是Planning用来对接Routing搜索结果的子模块
+	//ReferenceLineInfo
+	在ReferenceLine之外，在common目录下还有一个结构：ReferenceLineInfo，这个结构才是各个模块实际用到数据结构，它其中包含了ReferenceLine，但还有其他更详细的数据。
+	从ReferenceLine到ReferenceLineInfo是在Frame::CreateReferenceLineInfo中完成的。
 
-	 modules/common/proto/geometry.proto  //PointENU：描述了地图上的一个点
-	 modules/common/proto/pnc_point.proto //SLPoint：描述了Frenet坐标系上的一个点。s表示距离起点的纵向距离，l表示距离中心线的侧向距离
-	 modules/map/pnc_map/path.h      // LaneWaypoint：描述了车道上的点
-	 modules/common/vehicle_state/proto/vehicle_state.proto    //VehicleState：描述车辆状态，包含了自车位置，姿态，方向，速度，加速度等信息
+	modules/planning/common/frame.cc
 
-	
-	RouteSegments:
-	我们回顾一下，Routing的搜索结果RoutingResponse中包含了下面三个层次的结构：
-
-		RoadSegment：描述道路，一条道路可能包含了并行的几条通路（Passage）
-		Passage：描述通路，通路是直连不含变道的可行驶区域。一个通路可能包含了前后连接的多个车道
-		LaneSegment：描述车道，车道是道路中的一段，自动驾驶车辆会尽可能沿着车道的中心线行驶
-		
-	而pnc_map模块中的RouteSegments对应了上面的Passage结构，它其中会包含若干个车道信息。这个类继承自std::vector<LaneSegment>
-
-
-
-	RouteSegments中有如下一些方法值得关注：
-	NextAction()：车辆接下来要采取的动作。可能是直行，左变道，或者右变道。
-	CanExit()：当前通路是否可以接续到Routing结果的另外一个通路上。
-	GetProjection()：将一个点投影到当前通路上。返回SLPoint和LaneWaypoint。
-	Stitch()：缝合另外一个RouteSegments。即：去除两个RouteSegments间重合的多余部分，然后连接起来。
-	Shrink()：缩短到指定范围。
-	IsOnSegment()：车辆是否在当前RouteSegments上。
-	IsNeighborSegment()：当前RouteSegments是否是车辆的临近RouteSegments
-
-
-	PncMap类负责对接Routing搜索结果的更新
-	PncMap会根据车辆当前位置，提供车辆周边的RouteSegments信息供ReferenceLineProvider生成ReferenceLine。“车辆周边”与车辆的纵向和横向相关
-
-	对于纵向来说，PncMap返回的结果是前后一定范围内的。具体的范围由下面三个值决定：
-
-	modules/map/pnc_map/pnc_map.cc:
-
-	DEFINE_double(look_backward_distance, 30,"look backward this distance when creating reference line from routing"); //向后是30米的范围
-
-	DEFINE_double(look_forward_short_distance, 180,"short look forward this distance when creating reference line " "from routing when ADC is slow");//向前是根据车辆的速度返回180米或者250米的范围
-
-	DEFINE_double(look_forward_long_distance, 250,"look forward this distance when creating reference line from routing");
-
-	对于横向来说，如果Routing的搜索结果包含变道的信息。则PncMap提供的数据会包含自车所在车道和变道后的相关通路
-
-
-	/modules/map/pnc_map/pnc_map.c
-	PncMap中的下面这个方法用来接收车辆的状态更新。当然，这其中很重要的就是位置状态。
-	bool PncMap::UpdateVehicleState(const VehicleState &vehicle_state)
-
-
-
-
-
-
-27. ReferenceLine结构
-
-	前面我们已经说了，参考线是根据车辆位置相对局部的一个数据，它包含了车辆前后一定范围内的路径信息。在车辆行驶过程中，Planning会在每一个计算周期中生成ReferenceLine.
-
-	modules/planning/reference_line/reference_line.h:
-
-	
-		// speed_limit_是限速数据
-	  struct SpeedLimit {
-	    double start_s = 0.0;
-	    double end_s = 0.0;
-	    double speed_limit = 0.0;  // unit m/s
-	    SpeedLimit() = default;
-	    SpeedLimit(double _start_s, double _end_s, double _speed_limit)
-	        : start_s(_start_s), end_s(_end_s), speed_limit(_speed_limit) {}
-	  };
-	  /**
-	   * This speed limit overrides the lane speed limit
-	   **/
-	  std::vector<SpeedLimit> speed_limit_;
-	  std::vector<ReferencePoint> reference_points_;
-	  hdmap::Path map_path_;	//reference_points_其实是从map_path_得到，具体见ReferenceLine的构造函数。所以这两个数据的作用其实是一样的。
-	  uint32_t priority_ = 0;	//priority_是优先级，不过在PublicRoadPlanner中没有用到
-
-
-
-
-	  // reference_points_其实是从map_path_得到，具体见ReferenceLine的构造函数。所以这两个数据的作用其实是一样的。
-	  /modules/planning/reference_line/reference_line.cc:
-
-	  ReferenceLine::ReferenceLine(const MapPath& hdmap_path): map_path_(hdmap_path) {
-	  for (const auto& point : hdmap_path.path_points()) {
-	    DCHECK(!point.lane_waypoints().empty());
-	    const auto& lane_waypoint = point.lane_waypoints()[0];
-	    reference_points_.emplace_back( hdmap::MapPathPoint(point, point.heading(), lane_waypoint), 0.0, 0.0 );
+	bool Frame::CreateReferenceLineInfo( const std::list<ReferenceLine> &reference_lines, const std::list<hdmap::RouteSegments> &segments) {
+	  reference_line_info_.clear();
+	  auto ref_line_iter = reference_lines.begin();
+	  auto segments_iter = segments.begin();
+	  while (ref_line_iter != reference_lines.end()) {
+	    if (segments_iter->StopForDestination()) {
+	      is_near_destination_ = true;
+	    }
+	    reference_line_info_.emplace_back( vehicle_state_, planning_start_point_, *ref_line_iter, *segments_iter);
+	    ++ref_line_iter;
+	    ++segments_iter;
 	  }
-	  CHECK_EQ(map_path_.num_points(), reference_points_.size());
+
+	  ReferenceLineInfo不仅仅包含了参考线信息，还包含了车辆状态，路径信息，速度信息，决策信息以及轨迹信息等。Planning模块的算法很多都是基于ReferenceLineInfo结构完成的。
+	  apollo/modules/planning/scenarios/stage.cc
+
+	  bool Stage::ExecuteTaskOnReferenceLine( const common::TrajectoryPoint& planning_start_point, Frame* frame) {
+		  for (auto& reference_line_info : *frame->mutable_reference_line_info()) {
+		    if (!reference_line_info.IsDrivable()) {
+		      AERROR << "The generated path is not drivable";
+		      return false;
+		    }
+		    auto ret = common::Status::OK();
+		    for (auto* task : task_list_) {
+		      ret = task->Execute(frame, &reference_line_info);
+		      if (!ret.ok()) {
+		        AERROR << "Failed to run tasks[" << task->Name() << "], Error message: " << ret.error_message();
+		        break;
+		      }
+		    }
+		    if (reference_line_info.speed_data().empty()) {
+		      *reference_line_info.mutable_speed_data() = SpeedProfileGenerator::GenerateFallbackSpeedProfile();
+		      reference_line_info.AddCost(kSpeedOptimizationFallbackCost);
+		      reference_line_info.set_trajectory_type(ADCTrajectory::SPEED_FALLBACK);
+		    } else {
+		      reference_line_info.set_trajectory_type(ADCTrajectory::NORMAL);
+		    }
+		    DiscretizedTrajectory trajectory;
+		    if (!reference_line_info.CombinePathAndSpeedProfile(planning_start_point.relative_time(), planning_start_point.path_point().s(), &trajectory)) {
+		      AERROR << "Fail to aggregate planning trajectory.";
+		      return false;
+		    }
+		    reference_line_info.SetTrajectory(trajectory);
+		    reference_line_info.SetDrivable(true);
+		    return true;
+		  }
+		  return true;
 	}
 
 
-28. std::vector<ReferencePoint>是一系列的点，点包含了位置的信息。因此这些点就是生成车辆行驶轨迹的基础数据:
-
-	ReferencePoint由MapPathPoint继承而来
-
-	/modules/common/math/vec2d.h:
-	Vec2d描述一个二维的点，包含的数据成员如下：
-	double x_：描述点的x坐标
-	double y_：描述点的y坐标
+11.
+	// Smoother
+	为了保证车辆轨迹的平顺，参考线必须是经过平滑的，目前Apollo中包含了这么几个Smoother用来做参考线的平滑：
+	在实现中，Smoother用到了下面两个开源库：Ipopt Project,Eigen
 
 
-	/modules/map/pnc_map/path.h
-	MapPathPoint描述了一个地图上的点，包含的数据成员如下：
-	double heading_：描述点的朝向。
-	std::vector<LaneWaypoint> lane_waypoints_：描述路径上的点。有些车道可能会存在重合的部分，所以地图上的一个点可能同时属于多个车道，因此这里的数据是一个vector结构
+	// TrafficRule
+	行驶在城市道路上的自动驾驶车辆必定受到各种交通规则的限制。在正常情况下，车辆不应当违反交通规则。另外，交通规则通常是多种条例，不同城市和国家地区的交通规则可能是不一样的。如果处理好这些交通规则就是模块实现需要考虑的了。
+	交通条例的生效并非是一成不变的，因此自然就需要有一个配置文件来进行配置。交通规则的配置文件是：modules/planning/conf/traffic_rule_config.pb.txt
 
 
-	/modules/planning/reference_line/reference_point.h
-	ReferencePoint描述了参考线中的点，包含的数据成员如下：
-	double kappa_：描述曲线的曲率
-	double dkappa_：描述曲率的导数	
+	//TrafficDecider
+	TrafficDecider是交通规则处理的入口，它负责读取上面这个配置文件，并执行交通规则的检查。在上文中我们已经看到，交通规则的执行是在StdPlanning::RunOnce中完成的
 
+	modules/planning/traffic_rules/traffic_decider.cc
 
-	如果你打开Apollo项目中的demo地图文件你就会发现，地图中记录的仅仅是每个点x和y坐标，并没有记录heading和kappa数据。事实上，这些数据都是在读取地图原始点数据之后计算出来的.// /modules/map/data/demo/base_map.txt
+	Status TrafficDecider::Execute( Frame *frame, ReferenceLineInfo *reference_line_info) {
+	  CHECK_NOTNULL(frame);
+	  CHECK_NOTNULL(reference_line_info);
 
-
-
-29. 创建ReferenceLine
-
-	在每一次计算循环中，Planning模块都会通过ReferenceLineProvider生成ReferenceLine。ReferenceLine由Routing的搜索结果决定。Routing是预先搜索出的全局可达路径，而ReferenceLine是车辆当前位置的前后一段范围
-	直行的情况下，ReferenceLine是一个。而在需要变道的时候，会有多个ReferenceLine
-
-	bool ReferenceLineProvider::CreateReferenceLine(
-	    std::list<ReferenceLine> *reference_lines,
-	    std::list<hdmap::RouteSegments> *segments) {
-	  CHECK_NOTNULL(reference_lines);
-	  CHECK_NOTNULL(segments);
-
-	  common::VehicleState vehicle_state;
-	  {
-	    std::lock_guard<std::mutex> lock(vehicle_state_mutex_);
-	    vehicle_state = vehicle_state_;
-	  }
-
-	  routing::RoutingResponse routing;
-	  {
-	    std::lock_guard<std::mutex> lock(routing_mutex_);
-	    routing = routing_;
-	  }
-	  bool is_new_routing = false;
-	  {
-	    // Update routing in pnc_map
-	    if (pnc_map_->IsNewRouting(routing)) {					// PncMap对接了Routing的搜索结果。如果Routing的路线变了，这里需要进行更新
-	      is_new_routing = true;
-	      if (!pnc_map_->UpdateRoutingResponse(routing)) { 	
-	        AERROR << "Failed to update routing in pnc map";
-	        return false;
-	      }
+	  for (const auto &rule_config : rule_configs_.config()) {
+	    if (!rule_config.enabled()) {  //遍历配置文件中的每一条交通规则，判断是否enable。
+	      ADEBUG << "Rule " << rule_config.rule_id() << " not enabled";
+	      continue;
 	    }
+	    auto rule = s_rule_factory.CreateObject(rule_config.rule_id(), rule_config); //创建具体的交通规则对象
+	    if (!rule) {
+	      AERROR << "Could not find rule " << rule_config.DebugString();
+	      continue;
+	    }
+	    rule->ApplyRule(frame, reference_line_info); //执行该条交通规则逻辑
+	    ADEBUG << "Applied rule " << TrafficRuleConfig::RuleId_Name(rule_config.rule_id());
 	  }
 
-	  if (!CreateRouteSegments(vehicle_state, segments)) {				// 车辆的位置一直会变动（vehicle_state中包含了这个信息）。如果Routing的结果需要变道，则segments将是多个，否则就是一个（直行的情况）
-	    AERROR << "Failed to create reference line from routing";		// CreateRouteSegments方法中会调用pnc_map_->GetRouteSegments(vehicle_state, segments)来获取车辆当前位置周边范围的RouteSegment
-	    	    return false;											// 如果Routing的结果需要变道，则segments将是多个，否则就是一个（直行的情况）
-	  }
-
-	  if (is_new_routing || !FLAGS_enable_reference_line_stitching) {
-	    for (auto iter = segments->begin(); iter != segments->end();) {
-	      reference_lines->emplace_back();
-	      if (!SmoothRouteSegment(*iter, &reference_lines->back())) {
-	        AERROR << "Failed to create reference line from route segments";
-	        reference_lines->pop_back();
-	        iter = segments->erase(iter);
-	      } else {
-	        ++iter;
-	      }
-	    }
-	    return true;
-	  } else {  // stitching reference line
-	    for (auto iter = segments->begin(); iter != segments->end();) {
-	      reference_lines->emplace_back();
-	      if (!ExtendReferenceLine(vehicle_state, &(*iter), &reference_lines->back())) { // 大部分情况下，在车辆行驶过程中，会不停的根据车辆的位置对ReferenceLine进行长度延伸。ReferenceLine的长度是200多米的范围（往后30米左右，往前180米或者250米左右）
-	        AERROR << "Failed to extend reference line";
-	        reference_lines->pop_back();
-	        iter = segments->erase(iter);
-	      } else {
-	        ++iter;
-	      }
-	    }
-	  }
-	  return true;
+	  BuildPlanningTarget(reference_line_info);   //在ReferenceLineInfo上合并处理所有交通规则最后的结果
+	  return Status::OK();
 	}
 
 
-	在车辆行驶过程中，必不可少的就是判断自车以及障碍物所处的位置。这就很自然的需要将物体投影到参考线上来进行计算
+12.
+	//Task
+	一直到目前最新的Apollo 3.5版本为止，Planning模块最核心的算法就是其EM Planner（实现类是PublicRoadPlanner），而EM Planner最核心的就是其决策器和优化器。
+	但由于篇幅所限，这部分内容本文不再继续深入。预计后面会再通过一篇文章来讲解。这里我们仅仅粗略的了解一下其实现结构。
+	Planning中这部分逻辑实现位于tasks目录下，无论是决策器还是优化器都是从apollo::planning::Task继承的。
 
-	ReferencePoint GetReferencePoint(const double s) const;
-	common::FrenetFramePoint GetFrenetPoint(
-	  const common::PathPoint& path_point) const;
-	std::vector<ReferencePoint> GetReferencePoints(double start_s,
-	                                             double end_s) const;
-	size_t GetNearestReferenceIndex(const double s) const;
-	ReferencePoint GetNearestReferencePoint(const common::math::Vec2d& xy) const;
-	std::vector<hdmap::LaneSegment> GetLaneSegments(const double start_s,
-	                                              const double end_s) const;
-	ReferencePoint GetNearestReferencePoint(const double s) const;
-	ReferencePoint GetReferencePoint(const double x, const double y) const;
-	bool GetApproximateSLBoundary(const common::math::Box2d& box,
-	                            const double start_s, const double end_s,
-	                            SLBoundary* const sl_boundary) const;
-	bool GetSLBoundary(const common::math::Box2d& box,
-	                 SLBoundary* const sl_boundary) const;
-	bool GetSLBoundary(const hdmap::Polygon& polygon,
-	                 SLBoundary* const sl_boundary) const;
+	modules/planning/tasks/deciders/decider.cc
+	Decider::Decider(const TaskConfig& config) : Task(config) {}
 
-
-
-30.  ReferenceLineSmoother
-	直接通过RouteSegments生成的ReferenceLine可能是不平滑的。	如果直接让车辆沿着不平滑的路线行驶可能造成车辆方向的抖动或者大幅变化，这对乘坐体验来说非常不好。因此，原始的路线数据需要经过算法的平滑。
-
-
-	modules/planning/reference_line/reference_line_provider.cc
-
-	bool ReferenceLineProvider::SmoothReferenceLine( const ReferenceLine &raw_reference_line, ReferenceLine *reference_line) {
-	  if (!FLAGS_enable_smooth_reference_line) {
-	    *reference_line = raw_reference_line;
-	    return true;
-	  }
-	  // generate anchor points:
-	  std::vector<AnchorPoint> anchor_points;
-	  GetAnchorPoints(raw_reference_line, &anchor_points);
-	  smoother_->SetAnchorPoints(anchor_points);
-	  if (!smoother_->Smooth(raw_reference_line, reference_line)) {			// smoother_->Smooth才是平滑算法的实现
-	    AERROR << "Failed to smooth reference line with anchor points";
-	    return false;
-	  }
-	  if (!IsReferenceLineSmoothValid(raw_reference_line, *reference_line)) {
-	    AERROR << "The smoothed reference line error is too large";
-	    return false;
-	  }
-	  return true;
+	apollo::common::Status Decider::Execute( Frame* frame, ReferenceLineInfo* reference_line_info) {
+	  Task::Execute(frame, reference_line_info);
+	  return Process(frame, reference_line_info);
 	}
 
-	目前Apollo的Planning模块中内置了三个ReferenceLine平滑器,具体使用哪一个平滑器由ReferenceLineProvider在初始化的时候读取配置文件来决定
+	apollo::common::Status Decider::Execute(Frame* frame) {
+	  Task::Execute(frame);
+	  return Process(frame);
+	}
 
-	CHECK(common::util::GetProtoFromFile(FLAGS_smoother_config_filename, &smoother_config_))
+	// Task配置:上文中我们已经提到，场景和Task配置是在一起的
+	/modules/planning/conf/scenario
 
-	modules/planning/conf/qp_spline_smoother_config.pb.txt //使用的是QpSplineReferenceLineSmoother
+	一个Scenario可能有多个Stage，每个Stage可以指定相应的Task，下面是一个配置示例：
+	/modules/planning/conf/scenario/lane_follow_config.pb.txt
 
-	modules/planning/common/planning_gflags.cc
-	DEFINE_string(smoother_config_filename, "/apollo/modules/planning/conf/qp_spline_smoother_config.pb.txt", "The configuration file for qp_spline smoother");
+	scenario_type: LANE_FOLLOW
+	stage_type: LANE_FOLLOW_DEFAULT_STAGE
+	stage_config: {
+	  stage_type: LANE_FOLLOW_DEFAULT_STAGE
+	  enabled: true
+	  task_type: DECIDER_RULE_BASED_STOP
+	  task_type: PATH_BOUND_DECIDER
+	  task_type: PIECEWISE_JERK_PATH_OPTIMIZER
+	  task_type: PATH_DECIDER
+	  task_type: SPEED_BOUNDS_PRIORI_DECIDER
+	  task_type: DP_ST_SPEED_OPTIMIZER
+	  task_type: SPEED_DECIDER
+	  task_type: SPEED_BOUNDS_FINAL_DECIDER
+	  task_type: QP_SPLINE_ST_SPEED_OPTIMIZER
+	  task_type: DECIDER_RSS
 
-
-	ReferenceLineSmoother算法:参考线平滑器使用了二次规划（Quadratic programming ）和样条插值（Spline interpolation）算法
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-2. 交通标识牌 planning:
-
-     Two inputs to planning: Prediction (预测信息:如交通标志和障碍物等) perception_obstacles.proto定义了表示车辆周围的障碍物的数据，车辆周围障碍物的数据由感知模块提供。traffic_light_detection定义了信号灯状态的数据
-     					     Relative Map
-
-
-
-    阿波罗高精地图:交通信号元素：红绿灯、道路标牌(道路指示牌)
-
-
-     TrafficDecider与交通规则相关
-
-
-
-     struct LocalView {
-	  std::shared_ptr<prediction::PredictionObstacles> prediction_obstacles;
-	  std::shared_ptr<canbus::Chassis> chassis;
-	  std::shared_ptr<localization::LocalizationEstimate> localization_estimate;
-	  std::shared_ptr<perception::TrafficLightDetection> traffic_light;	//交通灯信息
-	  std::shared_ptr<routing::RoutingResponse> routing;
-	  bool is_new_routing = false;
-	  std::shared_ptr<relative_map::MapMsg> relative_map;
-	};
+	  task_config: {
+	    task_type: DECIDER_RULE_BASED_STOP
+	  }
+	  task_config: {
+	    task_type: PATH_BOUND_DECIDER
+	  }
+	  task_config: {
+	    task_type: PIECEWISE_JERK_PATH_OPTIMIZER
+	  }
+	  task_config: {
+	    task_type: PATH_DECIDER
+	  }
+	  task_config: {
+	    task_type: SPEED_BOUNDS_PRIORI_DECIDER
+	  }
+	  task_config: {
+	    task_type: SPEED_BOUNDS_FINAL_DECIDER
+	  }
+	  task_config: {
+	    task_type: DP_ST_SPEED_OPTIMIZER
+	  }
+	  task_config: {
+	    task_type: SPEED_DECIDER
+	  }
+	  task_config: {
+	    task_type: QP_SPLINE_ST_SPEED_OPTIMIZER
+	  }
+	  task_config: {
+	    task_type: DECIDER_RULE_BASED_STOP//这里的task_type与Task实现类是一一对应的
+	  }
+	}
 
 
+	// Task读取
+	在构造Stage对象的时候，会读取这里的配置文件，然后创建相应的Task：
+
+	Stage::Stage( const ScenarioConfig::StageConfig& config) : config_(config) {
+	  name_ = ScenarioConfig::StageType_Name(config_.stage_type());
+	  next_stage_ = config_.stage_type();
+	  std::unordered_map<TaskConfig::TaskType, const TaskConfig*, std::hash<int>> config_map;
+	  for (const auto& task_config : config_.task_config()) {
+	    config_map[task_config.task_type()] = &task_config;
+	  }
+	  for (int i = 0; i < config_.task_type_size(); ++i) {
+	    auto task_type = config_.task_type(i);
+	    CHECK(config_map.find(task_type) != config_map.end()) << "Task: " << TaskConfig::TaskType_Name(task_type) << " used but not configured";
+	    auto iter = tasks_.find(task_type);
+	    if (iter == tasks_.end()) {
+	      auto ptr = TaskFactory::CreateTask(*config_map[task_type]);
+	      task_list_.push_back(ptr.get());
+	      tasks_[task_type] = std::move(ptr);
+	    } else {
+	      task_list_.push_back(iter->second.get());
+	    }
+	  }
+	}
 
 
-	可借助GDB调试命令对上述执行流程进行更为深入的理解，例如TrafficLightProtectedScenario场景中TrafficLightProtectedStageApproach阶段的PathLaneBorrowDecider任务的调用堆栈如下，从下往上看，对于任意一个任务的调用流程一目了然：
-
-#0  apollo::planning::PathLaneBorrowDecider::Process (this=0x7f8c28294460, frame=0x7f8c38029f70, 
-    reference_line_info=0x7f8c3802b140) at modules/planning/tasks/deciders/path_lane_borrow_decider/path_lane_borrow_decider.cc:39
-#1  0x00007f8c0468b7c8 in apollo::planning::Decider::Execute (this=0x7f8c28294460, frame=0x7f8c38029f70, 
-    reference_line_info=0x7f8c3802b140) at modules/planning/tasks/deciders/decider.cc:31
-#2  0x00007f8c065c4a01 in apollo::planning::scenario::Stage::ExecuteTaskOnReferenceLine (this=0x7f8c28293eb0, 
-    planning_start_point=..., frame=0x7f8c38029f70) at modules/planning/scenarios/stage.cc:96
-#3  0x00007f8c06e721da in apollo::planning::scenario::traffic_light::TrafficLightProtectedStageApproach::Process (
-    this=0x7f8c28293eb0, planning_init_point=..., frame=0x7f8c38029f70) at 
-    modules/planning/scenarios/traffic_light/protected/stage_approach.cc:48
-#4  0x00007f8c067f1732 in apollo::planning::scenario::Scenario::Process (
-    this=0x7f8c2801bf20, planning_init_point=..., frame=0x7f8c38029f70) 
-    at modules/planning/scenarios/scenario.cc:76
-#5  0x00007f8c186e153a in apollo::planning::PublicRoadPlanner::Plan (
-    this=0x23093de0, planning_start_point=..., frame=0x7f8c38029f70, 
-    ptr_computed_trajectory=0x7f8b9a5fbed0) at modules/planning/planner/public_road/public_road_planner.cc:51
-#6  0x00007f8c19ee5937 in apollo::planning::OnLanePlanning::Plan (
-    this=0x237f3b0, current_time_stamp=1557133995.3679764, stitching_trajectory=std::vector of length 1, 
-    capacity 1 = {...}, ptr_trajectory_pb=0x7f8b9a5fbed0)  at modules/planning/on_lane_planning.cc:436
-#7  0x00007f8c19ee40fa in apollo::planning::OnLanePlanning::RunOnce (
-    this=0x237f3b0, local_view=..., ptr_trajectory_pb=0x7f8b9a5fbed0) at modules/planning/on_lane_planning.cc:304
-#8  0x00007f8c1ab0d494 in apollo::planning::PlanningComponent::Proc (
-    this=0x1d0f310, prediction_obstacles=std::shared_ptr (count 4, weak 0) 0x7f8b840164f8, 
-    chassis=std::shared_ptr (count 4, weak 0) 0x7f8b84018a08, 
-    localization_estimate=std::shared_ptr (count 4, weak 0) 0x7f8b8400d3b8) at modules/planning/planning_component.cc:134
-#9  0x00007f8c1abb46c4 in apollo::cyber::Component<apollo::prediction::PredictionObstacles, 
-    apollo::canbus::Chassis, apollo::localization::LocalizationEstimate, apollo::cyber::NullType>::Process (this=0x1d0f310, 
-    msg0=std::shared_ptr (count 4, weak 0) 0x7f8b840164f8, msg1=std::shared_ptr (count 4, weak 0) 0x7f8b84018a08, 
-    msg2=std::shared_ptr (count 4, weak 0) 0x7f8b8400d3b8) at ./cyber/component/component.h:291
-#10 0x00007f8c1aba2698 in apollo::cyber::Component<apollo::prediction::PredictionObstacles, 
-    apollo::canbus::Chassis, apollo::localization::LocalizationEstimate, apollo::cyber::NullType>::Initialize(
-    apollo::cyber::proto::ComponentConfig const&)::{lambda(std::shared_ptr<apollo::prediction::PredictionObstacles> const&,     
-    std::shared_ptr<apollo::canbus::Chassis> const&, std::shared_ptr<apollo::localization::LocalizationEstimate> const&)#2}::operator()
-    (std::shared_ptr<apollo::prediction::PredictionObstacles> const&, std::shared_ptr<apollo::canbus::Chassis> const&, 
-    std::shared_ptr<apollo::localization::LocalizationEstimate> const&) const (__closure=0x2059a430, 
-    msg0=std::shared_ptr (count 4, weak 0) 0x7f8b840164f8, msg1=std::shared_ptr (count 4, weak 0) 0x7f8b84018a08,     
-    msg2=std::shared_ptr (count 4, weak 0) 0x7f8b8400d3b8) at ./cyber/component/component.h:378
-#11 0x00007f8c1abb4ad2 in apollo::cyber::croutine::RoutineFactory apollo::cyber::croutine::CreateRoutineFactory
-    <apollo::prediction::PredictionObstacles, apollo::canbus::Chassis, apollo::localization::LocalizationEstimate, 
-    apollo::cyber::Component<apollo::prediction::PredictionObstacles, apollo::canbus::Chassis, 
-    apollo::localization::LocalizationEstimate, apollo::cyber::NullType>::Initialize(
-    apollo::cyber::proto::ComponentConfig const&)::{lambda(std::shared_ptr<apollo::prediction::PredictionObstacles> const&, 
-    std::shared_ptr<apollo::canbus::Chassis> const&, std::shared_ptr<apollo::localization::LocalizationEstimate> const&)#2}&>
-    (apollo::cyber::Component<apollo::prediction::PredictionObstacles, apollo::canbus::Chassis, 
-    apollo::localization::LocalizationEstimate, apollo::cyber::NullType>::Initialize(apollo::cyber::proto::ComponentConfig const&)::
-    {lambda(std::shared_ptr<apollo::prediction::PredictionObstacles> const&, std::shared_ptr<apollo::canbus::Chassis> const&, 
-    std::shared_ptr<apollo::localization::LocalizationEstimate> const&)#2}&, 
-    std::shared_ptr<apollo::cyber::data::DataVisitor<apollo::prediction::PredictionObstacles, 
-    apollo::canbus::Chassis, apollo::localization::LocalizationEstimate, apollo::cyber::NullType> > const&)::
-    {lambda()#1}::operator()() const::{lambda()#1}::operator()() const (__closure=0x2059a420) at ./cyber/croutine/routine_factory.h:108
-#12 0x00007f8c1ac0466a in std::_Function_handler<void (), apollo::cyber::croutine::RoutineFactory 
-apollo::cyber::croutine::CreateRoutineFactory<apollo::prediction::PredictionObstacles, apollo::canbus::Chassis, apollo::localization::LocalizationEstimate, 
-apollo::cyber::Component<apollo::prediction::PredictionObstacles, apollo::canbus::Chassis, apollo::localization::LocalizationEstimate, 
-apollo::cyber::NullType>::Initialize(apollo::cyber::proto::ComponentConfig const&)::{lambda(std::shared_ptr<apollo::prediction::PredictionObstacles> const&, 
-std::shared_ptr<apollo::canbus::Chassis> const&, std::shared_ptr<apollo::localization::LocalizationEstimate> const&)#2}&>
-(apollo::cyber::Component<apollo::prediction::PredictionObstacles, apollo::canbus::Chassis, apollo::localization::LocalizationEstimate, 
-apollo::cyber::NullType>::Initialize(apollo::cyber::proto::ComponentConfig const&)::{lambda(std::shared_ptr<apollo::prediction::PredictionObstacles> const&, 
-std::shared_ptr<apollo::canbus::Chassis> const&, std::shared_ptr<apollo::localization::LocalizationEstimate> const&)#2}&, 
-std::shared_ptr<apollo::cyber::data::DataVisitor<apollo::prediction::PredictionObstacles, apollo::canbus::Chassis, apollo::localization::LocalizationEstimate, 
-apollo::cyber::NullType> > const&)::{lambda()#1}::operator()() const::{lambda()#1}>::_M_invoke(std::_Any_data const&) (__functor=...) at 
-/usr/include/c++/4.8/functional:2071
-#13 0x00007f8c5f5b86e8 in std::function<void ()>::operator()() const (this=0x205f1160) at /usr/include/c++/4.8/functional:2471
-#14 0x00007f8c57560cbc in apollo::cyber::croutine::CRoutine::Run (this=0x205f1148) at ./cyber/croutine/croutine.h:143
-#15 0x00007f8c5755ff55 in apollo::cyber::croutine::(anonymous namespace)::CRoutineEntry (arg=0x205f1148) a
- ———————————————— 
-版权声明：本文为CSDN博主「知行合一2018」的原创文章，遵循CC 4.0 by-sa版权协议，转载请附上原文出处链接及本声明。
-原文链接：https://blog.csdn.net/davidhopper/article/details/89360385
-
-
-
-2. 在Docker内部使用GDB调试
-gdb -q bazel-bin/modules/map/relative_map/navigation_lane_test
-1
-进入GDB调试界面后，使用l命令查看源代码，使用b 138在源代码第138行（可根据需要修改为自己所需的代码位置 ）设置断点，使用r命令运行navigation_lane_test程序，进入断点暂停后，使用p navigation_lane_查看当前变量值（可根据需要修改为其他变量名），使用n单步调试一条语句，使用s单步调试进入函数内部，使用c继续执行后续程序。如果哪个部分测试通不过，调试信息会立刻告诉你具体原因，可使用bt查看当前调用堆栈。
- ———————————————— 
-版权声明：本文为CSDN博主「知行合一2018」的原创文章，遵循CC 4.0 by-sa版权协议，转载请附上原文出处链接及本声明。
-原文链接：https://blog.csdn.net/davidhopper/article/details/82589722
+	// Task执行
+	Task的执行是在Stage::Process中，通过ExecuteTaskOnReferenceLine完成的

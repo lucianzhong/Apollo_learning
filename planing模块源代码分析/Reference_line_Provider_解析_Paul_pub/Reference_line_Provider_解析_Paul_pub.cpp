@@ -1,29 +1,8 @@
-
-1.  ReferenceLine
-	参考线是整个决策规划算法的基础。从前面的内容我们也看到了，在Planning模块的每个计算循环中，会先生成ReferencePath，然后在这个基础上进行后面的处理。例如：把障碍物投影到参考线上。
-
-	/modules/planning/reference_line/reference_line_provider.h
-
-	bool GetReferenceLines(std::list<ReferenceLine>* reference_lines, std::list<hdmap::RouteSegments>* segments);
-
-	planning涉及到三个模块:
-	routing模块，这部分内容已经在Routing模块一文中讲解过，本文不再赘述。
-	pnc_map模块：负责读取和处理Routing搜索结果。
-	planning模块：根据Routing结果和车辆的实时状态（包括周边环境）生成参考线和轨迹。
+Reference:
+https://paul.pub/apollo-reference-line/
 
 
-	在Planning模块中有以下三个数据结构将是本文关注的重点：
-
-	ReferenceLine：原始参考线，源码位于planning/reference_line/目录下。根据Routing的搜索结果生成。
-
-	ReferenceLineInfo：源码位于planning/common/目录下。Planning实现中，逻辑计算的基础数据结构，很多操作都会在这个数据结构上进行（例如：交通规则逻辑，障碍物投影，路径优化，速度决策等）。本文中的“参考线”一词将不区分ReferenceLine和ReferenceLineInfo两个结构。
-
-	Trajectory：下文中我们将看到，有好几个结构用来描述轨迹。它们在不同的场合下使用。这其中，ADCTrajectory是Planning模块的输出。它是Planning模块一次计算循环中，处理了所有逻辑的最终结果，包含了车辆行驶需要的所有信息。因此，这个数据将直接影响到自动驾驶车辆的行车行为。
-
-
-
-
-2. 决策规划模块负责生成车辆的行驶轨迹。要做到这一点，决策规划模块需要从宏观到局部经过三个层次来进行决策:
+1. 决策规划模块负责生成车辆的行驶轨迹。要做到这一点，决策规划模块需要从宏观到局部经过三个层次来进行决策:
 
 	1.第一个层次是Routing的搜索结果。Routing模块的输入是若干个按顺序需要达到的途径点（也可能只有一个起点和终点）。
 	  Routing模块根据地图的拓扑结构搜索出可达的完整路线来，这个路线的长度可能是几公里甚至几百公里。因此这个是最为宏观的数据。另外，Routing的搜索结果是相对固定的。在没有障碍物的情况下，车辆会一直沿着原先获取到的Routing路线行驶。
@@ -34,13 +13,30 @@
 
 	3.层次是轨迹。轨迹是决策规划模块的最终输出结果。它的依据是参考线。在同一时刻，参考线可能会有多条，例如：在变道的时候，自车所在车道和目标车道都会有一条参考线。而轨迹，是在所有可能的结果中，综合决策和优化的结果，最终的唯一结果。
 	  因此它是更为具体和局部的数据。轨迹不仅仅包含了车辆的路线，还包含了车辆行驶这条路线时的详细状态，例如：车辆的方向，速度，加速度等等。 
-
-
 	  在Planning模块一文中我们已经提到：参考线是整个决策规划算法的基础。在Planning模块的每个计算循环中，都会先生成参考线，然后在这个基础上进行后面的处理，例如：交通规则逻辑，障碍物投影，路径优化，速度决策等等。可以说，参考线贯穿了整个Planning模块的实现。
 
+	planning涉及到三个模块:
+		routing模块，这部分内容已经在Routing模块一文中讲解过，本文不再赘述。
+		pnc_map模块：负责读取和处理Routing搜索结果。
+		planning模块：根据Routing结果和车辆的实时状态（包括周边环境）生成参考线和轨迹。
+
+	在Planning模块中有以下三个数据结构将是本文关注的重点：
+		ReferenceLine：原始参考线，源码位于planning/reference_line/目录下。根据Routing的搜索结果生成。
+		ReferenceLineInfo：源码位于planning/common/目录下。Planning实现中，逻辑计算的基础数据结构，很多操作都会在这个数据结构上进行（例如：交通规则逻辑，障碍物投影，路径优化，速度决策等）。本文中的“参考线”一词将不区分ReferenceLine和ReferenceLineInfo两个结构。
+		Trajectory：下文中我们将看到，有好几个结构用来描述轨迹。它们在不同的场合下使用。这其中，ADCTrajectory是Planning模块的输出。它是Planning模块一次计算循环中，处理了所有逻辑的最终结果，包含了车辆行驶需要的所有信息。因此，这个数据将直接影响到自动驾驶车辆的行车行为。
+
+  ReferenceLine
+	ReferenceLine（参考线）与Routing模块和Planning模块都相关
+	参考线是整个决策规划算法的基础。从前面的内容我们也看到了，在Planning模块的每个计算循环中，会先生成ReferencePath，然后在这个基础上进行后面的处理。例如：把障碍物投影到参考线上。
+
+	/modules/planning/reference_line/reference_line_provider.h
+
+	bool GetReferenceLines(std::list<ReferenceLine>* reference_lines, std::list<hdmap::RouteSegments>* segments);
+
+	
 
 
-3. pnc_map
+2. pnc_map
 	pnc全称是Planning And Control。这是Planning用来对接Routing搜索结果的子模块
 
 	 modules/common/proto/geometry.proto  //PointENU：描述了地图上的一个点
@@ -51,23 +47,20 @@
 	
 	RouteSegments:
 	我们回顾一下，Routing的搜索结果RoutingResponse中包含了下面三个层次的结构：
-
 		RoadSegment：描述道路，一条道路可能包含了并行的几条通路（Passage）
 		Passage：描述通路，通路是直连不含变道的可行驶区域。一个通路可能包含了前后连接的多个车道
 		LaneSegment：描述车道，车道是道路中的一段，自动驾驶车辆会尽可能沿着车道的中心线行驶
 		
 	而pnc_map模块中的RouteSegments对应了上面的Passage结构，它其中会包含若干个车道信息。这个类继承自std::vector<LaneSegment>
 
-
-
 	RouteSegments中有如下一些方法值得关注：
-	NextAction()：车辆接下来要采取的动作。可能是直行，左变道，或者右变道。
-	CanExit()：当前通路是否可以接续到Routing结果的另外一个通路上。
-	GetProjection()：将一个点投影到当前通路上。返回SLPoint和LaneWaypoint。
-	Stitch()：缝合另外一个RouteSegments。即：去除两个RouteSegments间重合的多余部分，然后连接起来。
-	Shrink()：缩短到指定范围。
-	IsOnSegment()：车辆是否在当前RouteSegments上。
-	IsNeighborSegment()：当前RouteSegments是否是车辆的临近RouteSegments
+		NextAction()：车辆接下来要采取的动作。可能是直行，左变道，或者右变道。
+		CanExit()：当前通路是否可以接续到Routing结果的另外一个通路上。
+		GetProjection()：将一个点投影到当前通路上。返回SLPoint和LaneWaypoint。
+		Stitch()：缝合另外一个RouteSegments。即：去除两个RouteSegments间重合的多余部分，然后连接起来。
+		Shrink()：缩短到指定范围。
+		IsOnSegment()：车辆是否在当前RouteSegments上。
+		IsNeighborSegment()：当前RouteSegments是否是车辆的临近RouteSegments
 
 
 	PncMap类负责对接Routing搜索结果的更新
@@ -78,48 +71,45 @@
 	modules/map/pnc_map/pnc_map.cc:
 
 	DEFINE_double(look_backward_distance, 30,"look backward this distance when creating reference line from routing"); //向后是30米的范围
-
 	DEFINE_double(look_forward_short_distance, 180,"short look forward this distance when creating reference line " "from routing when ADC is slow");//向前是根据车辆的速度返回180米或者250米的范围
-
 	DEFINE_double(look_forward_long_distance, 250,"look forward this distance when creating reference line from routing");
 
 	对于横向来说，如果Routing的搜索结果包含变道的信息。则PncMap提供的数据会包含自车所在车道和变道后的相关通路
-
 
 	/modules/map/pnc_map/pnc_map.c
 	PncMap中的下面这个方法用来接收车辆的状态更新。当然，这其中很重要的就是位置状态。
 	bool PncMap::UpdateVehicleState(const VehicleState &vehicle_state)
 
+	此时PncMap会计算车辆已经经过了哪些Routing的途经点，以及下一个目标点等信息。在每一个Planning计算循环中，ReferenceLineProvider都会传入车辆的VehicleState给PncMap，并从PncMap获取车辆周围的通路（RouteSegments）。
+	PncMap中的下面这个方法返回Routing途经点还有哪些没有达到：
+	std::vector<routing::LaneWaypoint> PncMap::FutureRouteWaypoints() const
 
 
 
 
 
-4. ReferenceLine结构
+
+3. ReferenceLine结构
 
 	前面我们已经说了，参考线是根据车辆位置相对局部的一个数据，它包含了车辆前后一定范围内的路径信息。在车辆行驶过程中，Planning会在每一个计算周期中生成ReferenceLine.
 
 	modules/planning/reference_line/reference_line.h:
-
 	
-		// speed_limit_是限速数据
+	  // speed_limit_是限速数据
 	  struct SpeedLimit {
 	    double start_s = 0.0;
 	    double end_s = 0.0;
 	    double speed_limit = 0.0;  // unit m/s
 	    SpeedLimit() = default;
-	    SpeedLimit(double _start_s, double _end_s, double _speed_limit)
-	        : start_s(_start_s), end_s(_end_s), speed_limit(_speed_limit) {}
+	    SpeedLimit(double _start_s, double _end_s, double _speed_limit) : start_s(_start_s), end_s(_end_s), speed_limit(_speed_limit) {}
 	  };
-	  /**
-	   * This speed limit overrides the lane speed limit
-	   **/
+	  
+	  // This speed limit overrides the lane speed limit	  
 	  std::vector<SpeedLimit> speed_limit_;
-	  std::vector<ReferencePoint> reference_points_;
-	  hdmap::Path map_path_;	//reference_points_其实是从map_path_得到，具体见ReferenceLine的构造函数。所以这两个数据的作用其实是一样的。
+	  std::vector<ReferencePoint> reference_points_;  //reference_points_其实是从map_path_得到，具体见ReferenceLine的构造函数。所以这两个数据的作用其实是一样的。
+	  												 //std::vector<ReferencePoint>是一系列的点，点包含了位置的信息。因此这些点就是生成车辆行驶轨迹的基础数据
+	  hdmap::Path map_path_;	
 	  uint32_t priority_ = 0;	//priority_是优先级，不过在PublicRoadPlanner中没有用到
-
-
 
 
 	  // reference_points_其实是从map_path_得到，具体见ReferenceLine的构造函数。所以这两个数据的作用其实是一样的。
@@ -135,39 +125,38 @@
 	}
 
 
-5. std::vector<ReferencePoint>是一系列的点，点包含了位置的信息。因此这些点就是生成车辆行驶轨迹的基础数据:
+4. std::vector<ReferencePoint>是一系列的点，点包含了位置的信息。因此这些点就是生成车辆行驶轨迹的基础数据:
 
 	ReferencePoint由MapPathPoint继承而来
 
 	/modules/common/math/vec2d.h:
 	Vec2d描述一个二维的点，包含的数据成员如下：
-	double x_：描述点的x坐标
-	double y_：描述点的y坐标
-
+		double x_：描述点的x坐标
+		double y_：描述点的y坐标
 
 	/modules/map/pnc_map/path.h
 	MapPathPoint描述了一个地图上的点，包含的数据成员如下：
-	double heading_：描述点的朝向。
-	std::vector<LaneWaypoint> lane_waypoints_：描述路径上的点。有些车道可能会存在重合的部分，所以地图上的一个点可能同时属于多个车道，因此这里的数据是一个vector结构
-
+		double heading_：描述点的朝向。
+		std::vector<LaneWaypoint> lane_waypoints_：描述路径上的点。有些车道可能会存在重合的部分，所以地图上的一个点可能同时属于多个车道，因此这里的数据是一个vector结构
 
 	/modules/planning/reference_line/reference_point.h
 	ReferencePoint描述了参考线中的点，包含的数据成员如下：
-	double kappa_：描述曲线的曲率
-	double dkappa_：描述曲率的导数	
+		double kappa_：描述曲线的曲率
+		double dkappa_：描述曲率的导数	
 
+	除了坐标之外，ReferencePoint中的朝向和曲率也都是非常重要的数据。因为这些数据将直接影响车辆的方向控制。如果ReferenceLine中的ReferencePoint之间存在朝向和曲率大小震动或者数据跳变将可能导致车辆方向盘的相应变化，而这种变化对于乘车体验来说是非常糟糕的。
 
 	如果你打开Apollo项目中的demo地图文件你就会发现，地图中记录的仅仅是每个点x和y坐标，并没有记录heading和kappa数据。事实上，这些数据都是在读取地图原始点数据之后计算出来的.// /modules/map/data/demo/base_map.txt
 
 
-6. 创建ReferenceLine
+5. 创建ReferenceLine
 
-	在每一次计算循环中，Planning模块都会通过ReferenceLineProvider生成ReferenceLine。ReferenceLine由Routing的搜索结果决定。Routing是预先搜索出的全局可达路径，而ReferenceLine是车辆当前位置的前后一段范围
-	直行的情况下，ReferenceLine是一个。而在需要变道的时候，会有多个ReferenceLine
+	在每一次计算循环中，Planning模块都会通过ReferenceLineProvider生成ReferenceLine。ReferenceLine由Routing的搜索结果决定。Routing是预先搜索出的全局可达路径，而ReferenceLine是车辆当前位置的前后一段范围	直行的情况下，ReferenceLine是一个。
+	而在需要变道的时候，会有多个ReferenceLine
 
-	bool ReferenceLineProvider::CreateReferenceLine(
-	    std::list<ReferenceLine> *reference_lines,
-	    std::list<hdmap::RouteSegments> *segments) {
+	modules/planning/reference_line/reference_line_provider.cc
+
+	bool ReferenceLineProvider::CreateReferenceLine( std::list<ReferenceLine> *reference_lines, std::list<hdmap::RouteSegments> *segments) {
 	  CHECK_NOTNULL(reference_lines);
 	  CHECK_NOTNULL(segments);
 
@@ -182,10 +171,12 @@
 	    std::lock_guard<std::mutex> lock(routing_mutex_);
 	    routing = routing_;
 	  }
+
 	  bool is_new_routing = false;
 	  {
 	    // Update routing in pnc_map
-	    if (pnc_map_->IsNewRouting(routing)) {					// PncMap对接了Routing的搜索结果。如果Routing的路线变了，这里需要进行更新
+	    if (pnc_map_->IsNewRouting(routing)) {			// 对于新的Routing，则根据segments生成ReferenceLine，两者的数量是对应的。并且，ReferenceLine将直接从RouteSegment里面获取到道路的点的信息		
+	    												// PncMap对接了Routing的搜索结果。如果Routing的路线变了，这里需要进行更新
 	      is_new_routing = true;
 	      if (!pnc_map_->UpdateRoutingResponse(routing)) { 	
 	        AERROR << "Failed to update routing in pnc map";
@@ -200,7 +191,7 @@
 	  }
 
 	  if (is_new_routing || !FLAGS_enable_reference_line_stitching) {
-	    for (auto iter = segments->begin(); iter != segments->end();) {
+	    for (auto iter = segments->begin(); iter != segments->end();) {  
 	      reference_lines->emplace_back();
 	      if (!SmoothRouteSegment(*iter, &reference_lines->back())) {
 	        AERROR << "Failed to create reference line from route segments";
@@ -227,26 +218,19 @@
 	}
 
 
-	在车辆行驶过程中，必不可少的就是判断自车以及障碍物所处的位置。这就很自然的需要将物体投影到参考线上来进行计算
+6.	在车辆行驶过程中，必不可少的就是判断自车以及障碍物所处的位置。这就很自然的需要将物体投影到参考线上来进行计算,对于这些内容，可以浏览下面这些接口的实现。这些逻辑基本上是点和位置的计算，这里就不展开了。
 
 	ReferencePoint GetReferencePoint(const double s) const;
-	common::FrenetFramePoint GetFrenetPoint(
-	  const common::PathPoint& path_point) const;
-	std::vector<ReferencePoint> GetReferencePoints(double start_s,
-	                                             double end_s) const;
+	common::FrenetFramePoint GetFrenetPoint(const common::PathPoint& path_point) const;
+	std::vector<ReferencePoint> GetReferencePoints(double start_s, double end_s) const;
 	size_t GetNearestReferenceIndex(const double s) const;
 	ReferencePoint GetNearestReferencePoint(const common::math::Vec2d& xy) const;
-	std::vector<hdmap::LaneSegment> GetLaneSegments(const double start_s,
-	                                              const double end_s) const;
+	std::vector<hdmap::LaneSegment> GetLaneSegments(const double start_s, const double end_s) const;
 	ReferencePoint GetNearestReferencePoint(const double s) const;
 	ReferencePoint GetReferencePoint(const double x, const double y) const;
-	bool GetApproximateSLBoundary(const common::math::Box2d& box,
-	                            const double start_s, const double end_s,
-	                            SLBoundary* const sl_boundary) const;
-	bool GetSLBoundary(const common::math::Box2d& box,
-	                 SLBoundary* const sl_boundary) const;
-	bool GetSLBoundary(const hdmap::Polygon& polygon,
-	                 SLBoundary* const sl_boundary) const;
+	bool GetApproximateSLBoundary(const common::math::Box2d& box, const double start_s, const double end_s, SLBoundary* const sl_boundary) const;
+	bool GetSLBoundary(const common::math::Box2d& box, SLBoundary* const sl_boundary) const;
+	bool GetSLBoundary(const hdmap::Polygon& polygon, SLBoundary* const sl_boundary) const;
 
 
 
@@ -256,7 +240,7 @@
 
 	modules/planning/reference_line/reference_line_provider.cc
 
-	bool ReferenceLineProvider::SmoothReferenceLine( const ReferenceLine &raw_reference_line, ReferenceLine *reference_line) {
+	bool ReferenceLineProvider::SmoothReferenceLine(const ReferenceLine &raw_reference_line, ReferenceLine *reference_line) {
 	  if (!FLAGS_enable_smooth_reference_line) {
 	    *reference_line = raw_reference_line;
 	    return true;
@@ -291,12 +275,11 @@
 
 
 8. 创建ReferenceLineInfo
+
 	ReferenceLine主要是静态数据（路径点和限速）的存储，而ReferenceLineInfo中会包含动态信息（障碍物）和更多逻辑
 	ReferenceLineInfo由Frame根据ReferenceLine和RouteSegments创建得到。在每个Planning计算循环的开始，都会创建和初始化一个新的Frame，而Frame初始化的时候就会创建ReferenceLineInfo。当有多个ReferenceLine的时候，则意味着需要变道
 
-	bool Frame::CreateReferenceLineInfo(
-	    const std::list<ReferenceLine> &reference_lines,
-	    const std::list<hdmap::RouteSegments> &segments) {
+	bool Frame::CreateReferenceLineInfo( const std::list<ReferenceLine> &reference_lines,  const std::list<hdmap::RouteSegments> &segments) {  //ReferenceLineInfo由Frame根据ReferenceLine和RouteSegments创建得到
 	  reference_line_info_.clear();
 	  auto ref_line_iter = reference_lines.begin();
 	  auto segments_iter = segments.begin();
@@ -327,29 +310,24 @@
 
 9. 操作ReferenceLineInfo
 
-	主要有下面两个地方会操作ReferenceLineInfo：
-	
-	/modules/planning/traffic_rules：该目录下是交通规则的实现。不同Rule会向ReferenceLineInfo添加不同的数据，例如：障碍物，红绿灯等等。交通规则的应用是在TrafficDecider::Execute方法中执行的。
-
-	/modules/planning/tasks：该目录下是许多的决策器和优化器，这是Apollo EM Planner算法的核心。不过前面已经说过，由于篇幅所限，本文不会涉及这些内容。
+	主要有下面两个地方会操作ReferenceLineInfo：	
+		/modules/planning/traffic_rules：该目录下是交通规则的实现。不同Rule会向ReferenceLineInfo添加不同的数据，例如：障碍物，红绿灯等等。交通规则的应用是在TrafficDecider::Execute方法中执行的。
+		/modules/planning/tasks：该目录下是许多的决策器和优化器，这是Apollo EM Planner算法的核心。不过前面已经说过，由于篇幅所限，本文不会涉及这些内容。
 
 
    planning/traffic_rules/traffic_rule.h
   每个交通规则都会实现下面这个方法来完成其逻辑：
   virtual common::Status ApplyRule(Frame* const frame, ReferenceLineInfo* const reference_line_info) = 0;
 
-
+  这里的指针类型的参数就意味着方法实现可能会修改参数的值
   对于ReferenceLineInfo的操作，主要是修改该类的以下三个字段：
-
 	PathData path_data_：包含了路径相关的数据，逻辑实现位于modules/planning/common/path/中。
 	SpeedData speed_data_：包含了速度相关的数据，逻辑实现位于modules/planning/common/speed/。路径和速度最终将组合起来使用，以生成行车轨迹（见下文）。
 	PathDecision path_decision_：这个字段中包含了障碍物的决策信息
 
 
 	障碍物在Planning模块中通过apollo::planning::Obstacle描述。
-
 	障碍物分为横向障碍物和纵向障碍物。横向障碍物将可能导致车辆的nudge行为。而纵向障碍物可能导致车辆出现：stop，yield，follow，overtake行为。这几个行为的优先级从左到右依次递减。
-
 	预测模块对于同一个障碍物可能会有多个预测轨迹。此时在Planning模块中，会多个apollo::planning::Obstacle对象分别对应每一个轨迹。
 
 
@@ -388,7 +366,7 @@
 	  repeated PathPoint path_point = 2;
 	}
 
-	message TrajectoryPoint {
+	message TrajectoryPoint {  //轨迹中的点通过TrajectoryPoint这个结构来描述
 	  // path point
 	  optional PathPoint path_point = 1;
 	  // linear velocity
@@ -403,8 +381,6 @@
 	  optional double steer = 6;
 	}
 
-
-
 	TrajectoryPoint 仅仅是一个点。而一条轨迹一定是由许多个点构成的。因此，描述轨迹的类DiscretizedTrajectory继承自std::vector<common::TrajectoryPoint>
 	class DiscretizedTrajectory : public std::vector<common::TrajectoryPoint>
 
@@ -415,14 +391,13 @@
 	这个方法是将Planning模块中的轨迹数据结构导出到可发布的状态。这里的ADCTrajectory是Planning最终往外发出的数据结构，它也是在proto文件中定义的:modules/planning/proto/planning.proto
 
 
-
 11. 生成轨迹
 
 	从参考线到生成轨迹是由ReferenceLineInfo::CombinePathAndSpeedProfile方法完成的
 	在EM Planner中，路径和速度是分开优化的，这里是在将这两个优化的结果（记录在ReferenceLineInfo的path_data_和speed_data_中）合并成最终的结果
 
-
 	modules/planning/common/reference_line_info.cc
+
 	bool ReferenceLineInfo::CombinePathAndSpeedProfile( const double relative_time, const double start_s, DiscretizedTrajectory* ptr_discretized_trajectory) {
 	  CHECK(ptr_discretized_trajectory != nullptr);
 	  // use varied resolution to reduce data load but also provide enough data
@@ -472,14 +447,10 @@
 
 /modules/planning/on_lane_planning.cc
 
-	Status OnLanePlanning::Plan(
-	    const double current_time_stamp,
-	    const std::vector<TrajectoryPoint>& stitching_trajectory,
-	    ADCTrajectory* const ptr_trajectory_pb) {
+	Status OnLanePlanning::Plan( const double current_time_stamp,  const std::vector<TrajectoryPoint>& stitching_trajectory,  ADCTrajectory* const ptr_trajectory_pb) {
 	  auto* ptr_debug = ptr_trajectory_pb->mutable_debug();
 	  if (FLAGS_enable_record_debug) {
-	    ptr_debug->mutable_planning_data()->mutable_init_point()->CopyFrom(
-	        stitching_trajectory.back());
+	    ptr_debug->mutable_planning_data()->mutable_init_point()->CopyFrom( stitching_trajectory.back());
 	    frame_->mutable_open_space_info()->set_debug(ptr_debug);
 	    frame_->mutable_open_space_info()->sync_debug_instance();
 	  }
@@ -547,7 +518,7 @@
 	    // set right of way status
 	    ptr_trajectory_pb->set_right_of_way_status(
 	        best_ref_info->GetRightOfWayStatus());
-	    for (const auto& id : best_ref_info->TargetLaneId()) {
+	    for (const auto& id : best_ref_info->TargetLaneId()) {  
 	      ptr_trajectory_pb->add_lane_id()->CopyFrom(id);
 	    }
 
@@ -591,7 +562,7 @@
 	    }
 
 	    last_publishable_trajectory_.reset(new PublishableTrajectory(
-	        current_time_stamp, best_ref_info->trajectory()));
+	        current_time_stamp, best_ref_info->trajectory()));   // 将轨迹的数据格式转换成PublishableTrajectory类型并记录到last_publishable_trajectory_中
 
 	    ADEBUG << "current_time_stamp: " << std::to_string(current_time_stamp);
 

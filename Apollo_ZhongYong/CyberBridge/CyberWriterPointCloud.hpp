@@ -5,13 +5,15 @@
 #pragma once
 #include <memory>
 
+class Imp;
+
 class CyberWriterPointCloud
 {
   public:
 	 CyberWriterPointCloud();
-	 ~CyberWriterPointCloud();
+	 // ~CyberWriterPointCloud() = default;
 	 void publish(int sequence, int width, int height, int step, const char *data) const;
 
   private:
-//	void *mpPublisher;
+	std::shared_ptr<Imp> mImp;
 };

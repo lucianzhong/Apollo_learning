@@ -13,31 +13,31 @@ public:
 };
 
 
-
 CyberWriterPointCloud::CyberWriterPointCloud():mImp(std::make_shared<Imp>())
 {
-	apollo::cyber::Init("apollo_publish_PointCloud");
+    apollo::cyber::Init("apollo_publish_PointCloud");
     auto node = apollo::cyber::CreateNode("writer");
-    mImp->mWriter = node->CreateWriter<apollo::drivers::PointCloud>:("/apollo/sensor/PointCloud");
+    mImp->mWriter = node->CreateWriter<apollo::drivers::PointCloud>("/apollo/sensor/lidar128/compensator/PointCloud2");
 }
-
-
-
 
 std::string names[] = {"x", "y", "z", "intensity", "ring"};
 int offsets[] = {0, 4, 8, 16, 20};
-int datatypes[] = {7, 7, 7, 7, 4}; //	uint8 FLOAT32 = 7， uint8 UINT16  = 4
+int datatypes[] = {7, 7, 7, 7, 4}; //   uint8 FLOAT32 = 7， uint8 UINT16  = 4
 
 
 
 void CyberWriterPointCloud::publish(int sequence, int width, int height, int step, const char *data) const{
-	
-	auto ts = apollo::cyber::Time::Now().ToSecond();
+    
+    std::cout<<"publish PointCloud"<<std::endl;
+    
+    auto ts = apollo::cyber::Time::Now().ToSecond();
 
-	auto PointCloud = std::make_shared<apollo::drivers::PointCloud>();
-    std::make_shared<apollo::drivers::PointXYZIT>(PointXYZIT)=PointCloud->add_point();
+    auto PointCloud = std::make_shared<apollo::drivers::PointCloud>();
 
-	// message
+    apollo::drivers::PointXYZIT *PointXYZIT=PointCloud->add_point();
+
+
+    // message
 
     // optional apollo.common.Header header = 1;
     PointCloud->mutable_header()->set_module_name("PointCloud");
@@ -52,9 +52,9 @@ void CyberWriterPointCloud::publish(int sequence, int width, int height, int ste
 
    
     std::vector<float> PointXYZIT_x;
-	std::vector<float> PointXYZIT_y;
+    std::vector<float> PointXYZIT_y;
     std::vector< float> PointXYZIT_z;
-	std::vector< float> PointXYZIT_intensity;
+    std::vector< float> PointXYZIT_intensity;
     //std::vector< int> PointXYZIT_timestamp;
 
 
@@ -68,38 +68,40 @@ void CyberWriterPointCloud::publish(int sequence, int width, int height, int ste
     }
     */
 
-	float x;
-	float y;
-	float z;
-	float intensity;
-	
+    float x;
+    float y;
+    float z;
+    float intensity;
+    
 
    for (int i=0;i<=width;i++){
-	   // x
-	   memcpy(&x, &data[i],4 * sizeof(char));
-	   i += 4;
-	   PointXYZIT_x.push_back(x);
-	   // y
-	   memcpy(&y, &data[i], 4 * sizeof(char));
-	   i += 4;
-	   PointXYZIT_y.push_back(y);
-	   // z
-	   memcpy(&z, &data[i], 4 * sizeof(char));
-	   i += 4;
-	   //intensity
-	   memcpy(&intensity,&data[i], 4 * sizeof(char));
-	   PointXYZIT_intensity.push_back(intensity);
-	   i += 4;
-	   // ring
-	   i += 2;
+       // x
+       memcpy(&x, &data[i],4 * sizeof(char));
+       i += 4;
+    
+       PointXYZIT->set_x(x);
+
+       // y
+       memcpy(&y, &data[i], 4 * sizeof(char));
+       i += 4;
+     
+         PointXYZIT->set_y(y);
+       // z
+       memcpy(&z, &data[i], 4 * sizeof(char));
+       i += 4;
+       PointXYZIT->set_z(z);
+       //intensity
+       memcpy(&intensity,&data[i], 4 * sizeof(char));
+        PointXYZIT->set_intensity(intensity);
+       i += 4;
+       // ring
+       i += 2;
    }
     
 
 
-    PointXYZIT->set_x(PointXYZIT_x);
-    PointXYZIT->set_y(PointXYZIT_y);
-    PointXYZIT->set_z(PointXYZIT_z);
-    PointXYZIT->set_intensity(PointXYZIT_intensity);
+  
+
     PointXYZIT->set_timestamp(ts);
 
     
@@ -118,6 +120,6 @@ void CyberWriterPointCloud::publish(int sequence, int width, int height, int ste
 
 
 
-	mImp->mWriter->Write(PointCloud);
+    mImp->mWriter->Write(PointCloud);
 
 }
