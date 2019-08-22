@@ -114,7 +114,7 @@
 	   4. RTKPlanner（循迹算法，一般不用。如需循迹，可使用Python脚本程序modules/tools/record_play/rtk_player.py）
 
 
-9. 场景(Scenario):
+9. // 场景(Scenario):
     
     每个场景又包含若干个阶段(Stage)，在每个阶段均使用若干个任务(Task)生成局部行驶轨迹.
     基于场景(Scenario)、阶段(Stage)和任务(Task)的理念进行规划，优点是能合理有效地应对每种场景，易于扩充，并且基于配置文件动态增减场景、阶段及使用的任务，灵活性强；缺点是可能会遗漏一些特殊场景，但可通过不断扩充新的场景加以解决
@@ -133,7 +133,7 @@
 			 9.PullOverScenario（靠边停车场景）
 			 10.ValetParkingScenario(泊车场景)等多个场景
 
-10.阶段(Stage)
+10. // 阶段(Stage)
 	每个场景又包含若干个阶段(Stage)，在每个阶段均使用若干个任务(Task)生成局部行驶轨迹
 
 	BareIntersectionUnprotectedScenario场景包含:
@@ -188,7 +188,7 @@
 								StageParking两个阶段。
 
 
-11.任务(Task)
+11.// 任务(Task)
 
    任务分为决策（Decider）与优化（Optimizer ）两类，
    其中决策类任务包含PathLaneBorrowDecider,SpeedLimitDecider等（所有决策类任务均包含于modules/planning/tasks/deciders目录），
@@ -222,19 +222,112 @@
 										  2.  PublicRoadPlanner::Plan
 
 
-    PublicRoadPlanner::Init: 
+    // PublicRoadPlanner::Init:
+	modules/planning/planner/public_road/public_road_planner.cc
+
+	Status PublicRoadPlanner::Init(const PlanningConfig& config) {
+	  config_ = config;
+	  std::set<ScenarioConfig::ScenarioType> supported_scenarios;
+	  const auto& public_road_config =
+	      config_.standard_planning_config().planner_public_road_config();
+
+	  for (int i = 0; i < public_road_config.scenario_type_size(); ++i) {
+	    const ScenarioConfig::ScenarioType scenario =
+	        public_road_config.scenario_type(i);
+	    supported_scenarios.insert(scenario);
+	  }
+	  scenario_manager_.Init(supported_scenarios); //调用scenario_manager_.Init(supported_scenarios);对这些场景进行初始化，具体而言就是先调用ScenarioManager::RegisterScenarios函数将配置文件中的所有场景添加到场景管理器对象scenario::ScenarioManager scenario_manager_中，再调用ScenarioManager::CreateScenario函数，生成当前路况对应的场景对象
+	  return Status::OK();
+	}
+
+
+
+	bool ScenarioManager::Init(
+	  const std::set<ScenarioConfig::ScenarioType>& supported_scenarios) {
+	  RegisterScenarios();  // 调用ScenarioManager::RegisterScenarios函数将配置文件中的所有场景添加到场景管理器对象scenario::ScenarioManager scenario_manager_中
+	  default_scenario_type_ = ScenarioConfig::LANE_FOLLOW;
+	  supported_scenarios_ = supported_scenarios;
+	  current_scenario_ = CreateScenario(default_scenario_type_); //调用ScenarioManager::CreateScenario函数，生成当前路况对应的场景对象std::unique_ptr<Scenario> current_scenario_
+	  return true;
+	}
+
+
+	void ScenarioManager::RegisterScenarios() {
+	  CHECK(Scenario::LoadConfig(FLAGS_scenario_lane_follow_config_file, &config_map_[ScenarioConfig::LANE_FOLLOW]));
+	  CHECK(Scenario::LoadConfig(FLAGS_scenario_side_pass_config_file,   &config_map_[ScenarioConfig::SIDE_PASS]));
+	  CHECK(Scenario::LoadConfig(FLAGS_scenario_stop_sign_unprotected_config_file,&config_map_[ScenarioConfig::STOP_SIGN_UNPROTECTED]));
+	  CHECK(Scenario::LoadConfig(FLAGS_scenario_traffic_light_right_turn_unprotected_config_file,&config_map_[ScenarioConfig::TRAFFIC_LIGHT_RIGHT_TURN_UNPROTECTED]));
+	}
+
+
+
+	std::unique_ptr<Scenario> ScenarioManager::CreateScenario(
+	  ScenarioConfig::ScenarioType scenario_type) {
+	  std::unique_ptr<Scenario> ptr;
+	  switch (scenario_type) {
+	    case ScenarioConfig::LANE_FOLLOW:
+	      ptr.reset(new lane_follow::LaneFollowScenario(config_map_[scenario_type], &scenario_context_));
+	      break;
+	    case ScenarioConfig::SIDE_PASS:
+	      ptr.reset(new scenario::side_pass::SidePassScenario(config_map_[scenario_type], &scenario_context_));
+	      break;
+	    case ScenarioConfig::STOP_SIGN_UNPROTECTED:
+	      ptr.reset(new scenario::stop_sign::StopSignUnprotectedScenario(config_map_[scenario_type], &scenario_context_));
+	      break;
+	    case ScenarioConfig::TRAFFIC_LIGHT_RIGHT_TURN_UNPROTECTED:
+	      ptr.reset(new scenario::traffic_light::TrafficLightRightTurnUnprotectedScenario(config_map_[scenario_type], &scenario_context_));
+	      break;
+	    default:
+	      return nullptr;
+	  }
+	  if (ptr != nullptr) {
+	    ptr->Init();
+	  }
+	  return ptr;
+	}
+
     首先读取配置文件/apollo/modules/planning/conf/planning_config.pb.txt，获取所有支持的场景supported_scenarios，
 	然后调用scenario_manager_.Init(supported_scenarios);对这些场景进行初始化: 具体而言就是先调用ScenarioManager::RegisterScenarios函数将配置文件中的所有场景添加到场景管理器对象scenario::ScenarioManager scenario_manager_中，
 	再调用ScenarioManager::CreateScenario函数，生成当前路况对应的场景对象std::unique_ptr<Scenario> current_scenario_。
 
 
+
+
+14. // PublicRoadPlanner::Plan
 	PublicRoadPlanner::Plan函数内:
 	首先调用函数 ScenarioManager:Update 根据实时路况更新当前场景对象std::unique_ptr<Scenario> current_scenario_，
     接着调用scenario_->Process(planning_start_point, frame)语句实施具体的场景算法。
     如果Scenario::Process函数的返回值是scenario::Scenario::STATUS_DONE，表明当前场景状态已完成，则再次调用函数ScenarioManager::Update更新当前场景，否则继续处理当前场景并返回。
 
 
-14. 看场景更新函数 ScenarioManager::Update 的代码
+    Status PublicRoadPlanner::Plan(const TrajectoryPoint& planning_start_point, Frame* frame) {
+	  DCHECK_NOTNULL(frame);
+	  scenario_manager_.Update(planning_start_point, *frame); //调用函数ScenarioManager:Update根据实时路况更新当前场景对象std::unique_ptr<Scenario> current_scenario_
+	  scenario_ = scenario_manager_.mutable_scenario();
+	  auto result = scenario_->Process(planning_start_point, frame); // 调用scenario_->Process(planning_start_point, frame)语句实施具体的场景算法
+
+	  if (FLAGS_enable_record_debug) {
+	    if (frame->output_trajectory()) {
+	      auto scenario_debug = frame->output_trajectory()->mutable_debug()->mutable_planning_data()->mutable_scenario();
+	      scenario_debug->set_scenario_type(scenario_->scenario_type());
+	      scenario_debug->set_stage_type(scenario_->GetStage());
+	      scenario_debug->set_msg(scenario_->GetMsg());
+	    }
+	  }
+	  if (result == scenario::Scenario::STATUS_DONE) {
+	    // only updates scenario manager when previous scenario's status is
+	    // STATUS_DONE
+	    scenario_manager_.Update(planning_start_point, *frame);
+	  } else if (result == scenario::Scenario::STATUS_UNKNOWN) {
+	    return Status(common::PLANNING_ERROR, "scenario returned unknown");
+	  }
+	  return Status::OK();
+	}
+
+
+
+
+15. 看场景更新函数 ScenarioManager::Update 的代码
 
 	apollo/modules/planning/scenarios/scenario_manager.cc
 
@@ -250,27 +343,150 @@
 	、SIGNAL（红绿灯） 、STOP_SIGN（停止标志）、YIELD_SIGN（让行标志），value表示对应的地图元素数据）
      
 
-	modules/planning/scenarios/scenario_manager.cc
-
+	//  用于更新first_encountered_overlap_map_
 	void ScenarioManager::Observe(const Frame& frame) {
 	  // init first_encountered_overlap_map_
 	  first_encountered_overlap_map_.clear();
 	  const auto& reference_line_info = frame.reference_line_info().front();
 	  const auto& first_encountered_overlaps = reference_line_info.FirstEncounteredOverlaps();
 	  for (const auto& overlap : first_encountered_overlaps) {
-	    if (overlap.first == ReferenceLineInfo::PNC_JUNCTION || overlap.first == ReferenceLineInfo::SIGNAL || overlap.first == ReferenceLineInfo::STOP_SIGN || overlap.first == ReferenceLineInfo::YIELD_SIGN) {
+	    if (overlap.first == ReferenceLineInfo::PNC_JUNCTION ||
+	        overlap.first == ReferenceLineInfo::SIGNAL ||
+	        overlap.first == ReferenceLineInfo::STOP_SIGN ||
+	        overlap.first == ReferenceLineInfo::YIELD_SIGN) {
 	      first_encountered_overlap_map_[overlap.first] = overlap.second;
 	    }
 	  }
 	}
 
 
-	
 
-     ScenarioManager::ScenarioDispatch使用Strategy设计模式来分派具体的场景
+	modules/planning/scenarios/scenario_manager.cc
+    // ScenarioManager::ScenarioDispatch使用Strategy设计模式来分派具体的场景
 
+	void ScenarioManager::ScenarioDispatch(const common::TrajectoryPoint& ego_point, const Frame& frame) {
+	  CHECK(!frame.reference_line_info().empty());
 
+	  ////////////////////////////////////////
+	  // default: LANE_FOLLOW
+	  ScenarioConfig::ScenarioType scenario_type = default_scenario_type_;
 
+	  // check current_scenario (not switchable)
+	  switch (current_scenario_->scenario_type()) {
+	    case ScenarioConfig::LANE_FOLLOW:
+	    case ScenarioConfig::CHANGE_LANE:
+	    case ScenarioConfig::PULL_OVER:
+	      break;
+	    case ScenarioConfig::BARE_INTERSECTION_UNPROTECTED:
+	    case ScenarioConfig::PARK_AND_GO:
+	    case ScenarioConfig::STOP_SIGN_PROTECTED:
+	    case ScenarioConfig::STOP_SIGN_UNPROTECTED:
+	    case ScenarioConfig::TRAFFIC_LIGHT_PROTECTED:
+	    case ScenarioConfig::TRAFFIC_LIGHT_UNPROTECTED_LEFT_TURN:
+	    case ScenarioConfig::TRAFFIC_LIGHT_UNPROTECTED_RIGHT_TURN:
+	    case ScenarioConfig::VALET_PARKING:
+	      // must continue until finish
+	      if (current_scenario_->GetStatus() !=
+	          Scenario::ScenarioStatus::STATUS_DONE) {
+	        scenario_type = current_scenario_->scenario_type();
+	      }
+	      break;
+	    default:
+	      break;
+	  }
+
+	  ////////////////////////////////////////
+	  // ParkAndGo / starting scenario
+	  if (scenario_type == default_scenario_type_) {
+	    if (FLAGS_enable_scenario_park_and_go) {
+	      scenario_type = SelectParkAndGoScenario(frame);
+	    }
+	  }
+
+	  ////////////////////////////////////////
+	  // intersection scenarios
+	  if (scenario_type == default_scenario_type_) {
+	    hdmap::PathOverlap* traffic_sign_overlap = nullptr;
+	    hdmap::PathOverlap* pnc_junction_overlap = nullptr;
+	    ReferenceLineInfo::OverlapType overlap_type;
+
+	    const auto& reference_line_info = frame.reference_line_info().front();
+	    const auto& first_encountered_overlaps =
+	        reference_line_info.FirstEncounteredOverlaps();
+	    // note: first_encountered_overlaps already sorted
+	    for (const auto& overlap : first_encountered_overlaps) {
+	      if (overlap.first == ReferenceLineInfo::SIGNAL ||
+	          overlap.first == ReferenceLineInfo::STOP_SIGN ||
+	          overlap.first == ReferenceLineInfo::YIELD_SIGN) {
+	        overlap_type = overlap.first;
+	        traffic_sign_overlap = const_cast<hdmap::PathOverlap*>(&overlap.second);
+	        break;
+	      } else if (overlap.first == ReferenceLineInfo::PNC_JUNCTION) {
+	        pnc_junction_overlap = const_cast<hdmap::PathOverlap*>(&overlap.second);
+	      }
+	    }
+
+	    if (traffic_sign_overlap) {
+	      switch (overlap_type) {
+	        case ReferenceLineInfo::STOP_SIGN:
+	          if (FLAGS_enable_scenario_stop_sign) {
+	            scenario_type =
+	                SelectStopSignScenario(frame, *traffic_sign_overlap);
+	          }
+	          break;
+	        case ReferenceLineInfo::SIGNAL:
+	          if (FLAGS_enable_scenario_traffic_light) {
+	            scenario_type =
+	                SelectTrafficLightScenario(frame, *traffic_sign_overlap);
+	          }
+	          break;
+	        case ReferenceLineInfo::YIELD_SIGN:
+	          // TODO(all): to be added
+	          // scenario_type = SelectYieldSignScenario(
+	          //     frame, *traffic_sign_overlap);
+	          break;
+	        default:
+	          break;
+	      }
+	    } else if (pnc_junction_overlap) {
+	      // bare intersection
+	      if (FLAGS_enable_scenario_bare_intersection) {
+	        scenario_type =
+	            SelectBareIntersectionScenario(frame, *pnc_junction_overlap);
+	      }
+	    }
+	  }
+
+	  ////////////////////////////////////////
+	  // CHANGE_LANE scenario
+	  if (scenario_type == default_scenario_type_) {
+	    scenario_type = SelectChangeLaneScenario(frame);
+	  }
+
+	  ////////////////////////////////////////
+	  // pull-over scenario
+	  if (scenario_type == default_scenario_type_) {
+	    if (FLAGS_enable_scenario_pull_over) {
+	      scenario_type = SelectPullOverScenario(frame);
+	    }
+	  }
+
+	  ////////////////////////////////////////
+	  // VALET_PARKING scenario
+	  if (scenario_type == default_scenario_type_) {
+	    scenario_type = SelectValetParkingScenario(frame);
+	  }
+
+	  ADEBUG << "select scenario: "
+	         << ScenarioConfig::ScenarioType_Name(scenario_type);
+
+	  // update PlanningContext
+	  UpdatePlanningContext(frame, scenario_type);
+
+	  if (current_scenario_->scenario_type() != scenario_type) {
+	    current_scenario_ = CreateScenario(scenario_type);
+	  }
+	}
 
 
 
