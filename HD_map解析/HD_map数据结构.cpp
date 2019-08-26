@@ -116,7 +116,7 @@
 	}
 
 	message Map {
-	  optional Header header = 1;
+	  optional Header header = 1;		//上面所说的地图基本信息
 
 	  repeated Crosswalk crosswalk = 2; // 人行道
 	  repeated Junction junction = 3;   //路口区域
@@ -146,6 +146,7 @@
 	}
 
 
+	// map_junction.proto 路口，道路汇聚点
 	modules/map/proto/map_junction.proto
 	// A junction is the junction at-grade of two or more roads crossing.
 	message Junction {
@@ -156,10 +157,8 @@
 
 
 
-	// map.lane.proto 车道线
+	// map.lane.proto 车道线  //介绍的比较复杂
 	modules/map/proto/map_lane.proto
-
-
 	message LaneBoundaryType {
 	  enum Type {
 	    UNKNOWN = 0;
@@ -192,32 +191,23 @@
 	  optional double width = 2;
 	}
 
-	// A lane is part of a roadway, that is designated for use by a single line of
-	// vehicles.
+	// A lane is part of a roadway, that is designated for use by a single line ofvehicles.
 	// Most public roads (include highways) have more than two lanes.
 	message Lane {
 	  optional Id id = 1; //编号
-
-	  // Central lane as reference trajectory, not necessary to be the geometry
-	  // central.
+	  // Central lane as reference trajectory, not necessary to be the geometry central.
 	  optional Curve central_curve = 2;//中心曲线
-
 	  // Lane boundary curve.
 	  optional LaneBoundary left_boundary = 3; //左边界
 	  optional LaneBoundary right_boundary = 4;//右边界
-
 	  // in meters.
 	  optional double length = 5;//长度
-
 	  // Speed limit of the lane, in meters per second.
 	  optional double speed_limit = 6;//速度限制
-
 	  repeated Id overlap_id = 7;//重叠区域id
-
 	  // All lanes can be driving into (or from).
 	  repeated Id predecessor_id = 8;//前任id
 	  repeated Id successor_id = 9; //继任者id
-
 	  // Neighbor lanes on the same direction.
 	  repeated Id left_neighbor_forward_lane_id = 10;//前面左边邻居id
 	  repeated Id right_neighbor_forward_lane_id = 11;//前面右边邻居id
@@ -230,6 +220,8 @@
 	    PARKING = 5;//停车
 	    SHOULDER = 6;
 	  };
+
+
 	  optional LaneType type = 12;//车道类型
 
 	  enum LaneTurn {
@@ -238,6 +230,7 @@
 	    RIGHT_TURN = 3;//右转弯
 	    U_TURN = 4;//掉头
 	  };
+
 	  optional LaneTurn turn = 13; //转弯类型
 
 	  repeated Id left_neighbor_reverse_lane_id = 14;//保留（后面？）左边邻居
@@ -265,29 +258,23 @@
 
 
 
-// modules/map/proto/map_stop_sign.proto
-/ A stop sign is a traffic sign to notify drivers that they must stop before
-// proceeding.
-message StopSign {
+	// modules/map/proto/map_stop_sign.proto
+	// A stop sign is a traffic sign to notify drivers that they must stop before proceeding.
+	message StopSign {
+	  optional Id id = 1; //编号
+	  repeated Curve stop_line = 2;  //停止线，Curve曲线应该是基础类型
+	  repeated Id overlap_id = 3;  //重叠id
 
-  optional Id id = 1; //编号
-
-  repeated Curve stop_line = 2;  //停止线，Curve曲线应该是基础类型
-
-  repeated Id overlap_id = 3;  //重叠id
-
-  enum StopType {
-    UNKNOWN = 0;   //未知
-    ONE_WAY = 1;  //只有一车道可以停
-    TWO_WAY = 2;
-    THREE_WAY = 3;
-    FOUR_WAY = 4;
-    ALL_WAY = 5;
-  };
-  optional StopType type = 4;
-}
-
-
+	  enum StopType {
+	    UNKNOWN = 0;   //未知
+	    ONE_WAY = 1;  //只有一车道可以停
+	    TWO_WAY = 2;
+	    THREE_WAY = 3;
+	    FOUR_WAY = 4;
+	    ALL_WAY = 5;
+	  };
+	  optional StopType type = 4;
+	}
 
 
 
@@ -330,53 +317,228 @@ message StopSign {
 	modules/map/proto/map_road.proto
 	
 	
-// 车道Lane
-modules/map/proto/map_lane.proto
+	// 车道Lane
+	modules/map/proto/map_lane.proto
 
 
-// 路口Junction
-modules/map/proto/map_pnc_junction.proto
+	// 路口Junction
+	modules/map/proto/map_pnc_junction.proto
 
 
 
+	map_signal.proto 交通信号标志
+	// 信号灯
+	message Subsignal {
+	  enum Type {
+	    UNKNOWN = 1;        //未知
+	    CIRCLE = 2;         //圆圈
+	    ARROW_LEFT = 3;     //向左箭头
+	    ARROW_FORWARD = 4;  //向前进箭头
+	    ARROW_RIGHT = 5;    //向右箭头
+	    ARROW_LEFT_AND_FORWARD = 6;      //向左前进箭头
+	    ARROW_RIGHT_AND_FORWARD = 7;     //向右前进箭头
+	    ARROW_U_TURN = 8;           //U型箭头
+	  };
 
-// 信号灯
-数据结构
-message Subsignal {
-  enum Type {
-    UNKNOWN = 1;        //未知
-    CIRCLE = 2;         //圆圈
-    ARROW_LEFT = 3;     //向左箭头
-    ARROW_FORWARD = 4;  //向前进箭头
-    ARROW_RIGHT = 5;    //向右箭头
-    ARROW_LEFT_AND_FORWARD = 6;      //向左前进箭头
-    ARROW_RIGHT_AND_FORWARD = 7;     //向右前进箭头
-    ARROW_U_TURN = 8;           //U型箭头
-  };
+	  optional Id id = 1;       //编号
+	  optional Type type = 2;   //类型
 
-  optional Id id = 1;       //编号
-  optional Type type = 2;   //类型
+	  // Location of the center of the bulb. now no data support.
+	  // 中间灯泡的位置
+	  optional apollo.common.PointENU location = 3;
+	}
+	message Signal {
+	  enum Type {
+	    UNKNOWN = 1;    //未知
+	    MIX_2_HORIZONTAL = 2;   //水平2灯
+	    MIX_2_VERTICAL = 3;     //垂直2灯
+	    MIX_3_HORIZONTAL = 4;   //水平3灯
+	    MIX_3_VERTICAL = 5;     //垂直3灯
+	    SINGLE = 6;
+	  };
 
-  // Location of the center of the bulb. now no data support.
-  // 中间灯泡的位置
-  optional apollo.common.PointENU location = 3;
-}
-message Signal {
-  enum Type {
-    UNKNOWN = 1;    //未知
-    MIX_2_HORIZONTAL = 2;   //水平2灯
-    MIX_2_VERTICAL = 3;     //垂直2灯
-    MIX_3_HORIZONTAL = 4;   //水平3灯
-    MIX_3_VERTICAL = 5;     //垂直3灯
-    SINGLE = 6;
-  };
+	  optional Id id = 1;               //编号
+	  optional Polygon boundary = 2;    //轮廓
+	  repeated Subsignal subsignal = 3; //子信号信息
+	  // TODO: add orientation. now no data support.对应行驶方向，目前无数据
+	  repeated Id overlap_id = 4; //重叠id
+	  optional Type type = 5;   //信号灯外形类型，见Type
+	  // stop line
+	  repeated Curve stop_line = 6; //车辆停止线位置
+	}
 
-  optional Id id = 1;               //编号
-  optional Polygon boundary = 2;    //轮廓
-  repeated Subsignal subsignal = 3; //子信号信息
-  // TODO: add orientation. now no data support.对应行驶方向，目前无数据
-  repeated Id overlap_id = 4; //重叠id
-  optional Type type = 5;   //信号灯外形类型，见Type
-  // stop line
-  repeated Curve stop_line = 6; //车辆停止线位置
-}
+
+
+	// 让行标志（美国才有）
+	map_yield_sign.proto 让行标志（美国才有）
+
+	message YieldSign {
+	  optional Id id = 1;       //编号
+	  repeated Curve stop_line = 2;    //在哪里结束
+	  repeated Id overlap_id = 3;     //重叠id
+	}
+
+
+
+	map_overlap.proto 
+	// 这里只介绍了LaneOverlapInfo，其他的还没有对应的格式,	逻辑概念，没有具体的规则显示这个区域
+
+	message LaneOverlapInfo {
+	  optional double start_s = 1;  //position (s-coordinate)
+	  optional double end_s = 2;    //position (s-coordinate)
+	  optional bool is_merge = 3;
+	}
+	// Information about one object in the overlap.
+	message ObjectOverlapInfo {
+	  optional Id id = 1;
+
+	  oneof overlap_info {
+	    LaneOverlapInfo lane_overlap_info = 3;
+	    SignalOverlapInfo signal_overlap_info = 4;
+	    StopSignOverlapInfo stop_sign_overlap_info = 5;
+	    CrosswalkOverlapInfo crosswalk_overlap_info = 6;
+	    JunctionOverlapInfo junction_overlap_info = 7;
+	    YieldOverlapInfo yield_sign_overlap_info = 8;
+	    ClearAreaOverlapInfo clear_area_overlap_info = 9;
+	    SpeedBumpOverlapInfo speed_bump_overlap_info = 10;
+	    ParkingSpaceOverlapInfo parking_space_overlap_info = 11;
+	    SidewalkOverlapInfo sidewalk_overlap_info = 12;
+	  }
+	}
+
+	// Here, the "overlap" includes any pair of objects on the map
+	// (e.g. lanes, junctions, and crosswalks).
+	message Overlap {
+	  optional Id id = 1;
+
+	  // Information about one overlap, include all overlapped objects.
+	  repeated ObjectOverlapInfo object = 2;
+	}
+
+
+
+	// 禁止停车
+	map_clear_area.proto 
+	// A clear area means in which stopping car is prohibited
+
+	message ClearArea {
+	  optional Id id = 1;            //编号
+	  repeated Id overlap_id = 2;    //重叠id
+	  optional Polygon polygon = 3;  //多边形
+	}
+
+
+	// 减速带
+	map_speed_bump.proto 
+
+	message SpeedBump {
+    optional Id id = 1;          //编号
+    repeated Id overlap_id = 2;   //重叠区域
+    repeated Curve position = 3;  //曲线位置
+	}
+
+
+	// 道路的信息，是由一些RoadSection组成
+	map_road.proto 道路的信息，是由一些RoadSection组成
+
+	// road section defines a road cross-section, At least one section must be defined in order to use a road, If multiple road sections are defined, they must be listed in order along the road
+	message RoadSection {
+	  optional Id id = 1;
+	  // lanes contained in this section
+	  repeated Id lane_id = 2;
+	  // boundary of section
+	  optional RoadBoundary boundary = 3;
+	}
+	// The road is a collection of traffic elements, such as lanes, road boundary etc.
+	// It provides general information about the road.
+	message Road {
+	  optional Id id = 1;
+	  repeated RoadSection section = 2;
+	  // if lane road not in the junction, junction id is null.
+	  optional Id junction_id = 3;
+	}
+
+
+	// 停车区域
+	map_parking.proto 
+
+	// ParkingSpace is a place designated to park a car.
+	message ParkingSpace {
+	  optional Id id = 1;
+
+	  optional Polygon polygon = 2;
+
+	  repeated Id overlap_id = 3;
+
+	  optional double heading = 4;
+	}
+
+
+	// 路边的小路，或者行人走的路
+	map_sidewalk.proto 
+
+	// A sidewalk (American English) or pavement (British English), also known as a footpath or footway, is a path along the side of a road.
+
+	message Sidewalk {
+	  optional Id id = 1;
+	  repeated Id overlap_id = 2;
+	  optional Polygon polygon = 3;
+	}
+
+
+	map_id.proto
+
+	这里的map_id是基础id?
+
+	message Id {
+	  optional string id = 1;     //id，字符类型
+	}
+
+
+	map_speed_control.proto 限制速度
+
+	message SpeedControl {
+	  optional string name = 1;
+	  optional apollo.hdmap.Polygon polygon = 2;
+	  optional double speed_limit = 3;
+	}
+
+
+	map_geometry.proto 地图的几何形状？
+
+	// Polygon, not necessary convex.
+	message Polygon {
+	  repeated apollo.common.PointENU point = 1;
+	}
+
+	// Straight line segment.
+	message LineSegment {
+	  repeated apollo.common.PointENU point = 1;
+	}
+
+	// Generalization of a line.
+	message CurveSegment {
+	  oneof curve_type {
+	    LineSegment line_segment = 1;
+	  }
+	  optional double s = 6;  // start position (s-coordinate)
+	  optional apollo.common.PointENU start_position = 7;
+	  optional double heading = 8;  // start orientation
+	  optional double length = 9;
+	}
+
+	// An object similar to a line but that need not be straight.
+	message Curve {
+	  repeated CurveSegment segment = 1;
+	}
+
+
+	map_pnc_junction.proto PNC路口（具体的场景是什么？？）
+
+	message PNCJunction {
+	  optional Id id = 1;
+
+	  optional Polygon polygon = 2;
+
+	  repeated Id overlap_id = 3;
+	}

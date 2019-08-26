@@ -289,3 +289,36 @@
 
 
 	地图的读取在adapter中，其中xml_parser目录提供解析xml的能力。而opendrive_adapter.cc则实现了地图的加载，转换为程序中的Map对象。然后地图在hdmap_impl.cc中提供一系列api接口给其他模块使用。
+
+
+5. 
+	// 看adapter模块，其中xml_parser就是针对道路的不同元素部分做的解析。
+
+	├── adapter
+	│   ├── BUILD
+	│   ├── coordinate_convert_tool.cc    // 坐标转换工具
+	│   ├── coordinate_convert_tool.h
+	│   ├── opendrive_adapter.cc          // 加载opendrive格式地图
+	│   ├── opendrive_adapter.h
+	│   ├── proto_organizer.cc            // 
+	│   ├── proto_organizer.h
+	│   └── xml_parser          // xml_parser针对道路的不同元素做相应解析
+	│       ├── common_define.h
+	│       ├── header_xml_parser.cc
+	│       ├── header_xml_parser.h
+	│       ├── junctions_xml_parser.cc
+	│       ├── junctions_xml_parser.h
+	│       ├── lanes_xml_parser.cc
+	│       ├── lanes_xml_parser.h
+	│       ├── objects_xml_parser.cc
+	│       ├── objects_xml_parser.h
+	│       ├── roads_xml_parser.cc
+	│       ├── roads_xml_parser.h
+	│       ├── signals_xml_parser.cc
+	│       ├── signals_xml_parser.h
+	│       ├── status.h
+	│       ├── util_xml_parser.cc
+	│       └── util_xml_parser.h
+
+
+	最后在看下hdmap_impl，主要实现了一系列的api来查找道路中的元素。由于实现的接口太多，后面有时间了看是否能够整理下api文档。

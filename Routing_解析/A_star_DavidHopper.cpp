@@ -250,9 +250,196 @@ https://blog.csdn.net/davidhopper/article/details/87438774
 
 
 
+4. // Navigator
+
+	在Routing模块中，当所有条件就绪时，就会使用高精地图搜索指定路径，其中在Routing代码中搜索路径的代码为
+	modules/routing/routing.cc
+
+	navigator_ptr_->SearchRoute(fixed_request, routing_response)
+
+	该代码的主要目标是在收到request请求后调用navigator指针中的SearchRoute方法，如果成功找到路径，就把结果赋值给routing_response；如果失败就返回错误。所以SearchRoute是navigator中关键的方法，本文也主要会针对该方法做一个介绍
+
+
+	modules/routing/core/navigator.cc
+	// ShowRequestInfo:  展示请求的详细信息，主要展示waypoint以及blacklist
+	bool ShowRequestInfo(const RoutingRequest& request, const TopoGraph* graph)
+
+
+	modules/routing/core/navigator.cc
+	// GetWayNodes：将request中的node以及node的s加入
+	bool GetWayNodes(const RoutingRequest& request, const TopoGraph* graph, std::vector<const TopoNode*>* const way_nodes, std::vector<double>* const way_s) {
+
+	modules/routing/core/navigator.cc
+	// SetErrorCode：报错信息
+	void SetErrorCode(const common::ErrorCode& error_code_id, const std::string& error_string, common::StatusPb* const error_code) 
+
+	modules/routing/core/navigator.cc
+	// PritDebugData：debug信息
+	void PrintDebugData(const std::vector<NodeWithRange>& nodes) 
+
+
+	modules/routing/core/navigator.cc
+	// Navigator：构造函数，查看是否已经准备好导航
+	Navigator::Navigator(const std::string& topo_file_path) 
+
+
+	modules/routing/core/navigator.cc
+	// IsReady：就绪标记函数
+	bool Navigator::IsReady() const { return is_ready_; }
+
+
+	Clear：清除拓扑图管理数据
+
+
+	modules/routing/core/navigator.cc
+	// Init：初始化函数
+	ool Navigator::Init(const RoutingRequest& request, const TopoGraph* graph, std::vector<const TopoNode*>* const way_nodes, std::vector<double>* const way_s) 
+
+
+	modules/routing/core/navigator.cc
+	// MergeRoute：路径结合
+	bool Navigator::MergeRoute( const std::vector<NodeWithRange>& node_vec, std::vector<NodeWithRange>* const result_node_vec) const 
+
+
+	modules/routing/core/navigator.cc
+	// SearchRouteByStrategy：利用Strategy中的算法来做路径规划，这里用的是Astar
+	bool Navigator::SearchRouteByStrategy( const TopoGraph* graph, const std::vector<const TopoNode*>& way_nodes, const std::vector<double>& way_s, std::vector<NodeWithRange>* const result_nodes) const
+
+
+	modules/routing/core/navigator.cc
+	// SearchRoute：搜索路径，如果有路径就返回True，并赋值，如果没有就返回False
+	bool Navigator::SearchRoute(const RoutingRequest& request, RoutingResponse* const response) 
 
 
 
+	// 主要函数详解:要函数包含有SearchRoute、Init、SearchRouteByStrategy、MergeRoute
+
+	// Init
+	bool Navigator::Init(const RoutingRequest& request, const TopoGraph* graph, std::vector<const TopoNode*>* const way_nodes, std::vector<double>* const way_s) {   // 初始化函数，传入请求，图，路径节点集合，路径s
+	  Clear();// 清除缓存变量，主要是拓扑图管理变量
+	  if (!GetWayNodes(request, graph_.get(), way_nodes, way_s)) {  //获取request的相关参数
+	    AERROR << "Failed to find search terminal point in graph!";
+	    return false;
+	  }
+	  black_list_generator_->GenerateBlackMapFromRequest(request, graph_.get(), &topo_range_manager_);   // 加入黑名单节点到拓扑图管理变量中
+	  return true;
+	}
+	//代码主要功能为将请求加入路径节点，节点的s，这两个参数对于搜索路径是有帮助的。第一个参数是node，也就是节点，第二个参数是开始位置。然后将路径中的不可达黑名单加入管理变量中。
 
 
 
+	//SearchRoute
+	bool Navigator::SearchRoute(const RoutingRequest& request, RoutingResponse* const response) {   // 搜索算法，输入request，response作为输出
+	  if (!ShowRequestInfo(request, graph_.get())) {
+	    SetErrorCode(ErrorCode::ROUTING_ERROR_REQUEST, "Error encountered when reading request point!", response->mutable_status());
+	    return false;  // 如果request详情没能展示，说明有误，返回错误
+	  }
+	  if (!IsReady()) {  // 如果构造函数初始化没有成功，就没能ready,返回错误
+	    SetErrorCode(ErrorCode::ROUTING_ERROR_NOT_READY, "Navigator is not ready!", response->mutable_status());
+	    return false;
+	  }
+	  std::vector<const TopoNode*> way_nodes; // 定义路径节点vector
+	  std::vector<double> way_s;  // 定义路径的S值vector
+	  if (!Init(request, graph_.get(), &way_nodes, &way_s)) { // 初始化数据，这里加入了请求的节点和S值
+	    SetErrorCode(ErrorCode::ROUTING_ERROR_NOT_READY, "Failed to initialize navigator!", response->mutable_status());
+	    return false;
+	  }
+	  std::vector<NodeWithRange> result_nodes; // 这就是需要的结果
+	  if (!SearchRouteByStrategy(graph_.get(), way_nodes, way_s, &result_nodes)) {  // 这里调用了使用策略算法来搜索路径
+	    SetErrorCode(ErrorCode::ROUTING_ERROR_RESPONSE,  "Failed to find route with request!", response->mutable_status());
+	    return false;
+	  }
+	  if (result_nodes.empty()) {  // 如果没有找到合适的结果
+	    SetErrorCode(ErrorCode::ROUTING_ERROR_RESPONSE, "Failed to result nodes!", response->mutable_status()); 
+	    return false;
+	  }
+	  result_nodes.front().SetStartS(request.waypoint().begin()->s());  // 结果的前项S为请求的开始点
+	  result_nodes.back().SetEndS(request.waypoint().rbegin()->s());	// 结果的后项S的结束点为请求的结束点
+
+	  if (!result_generator_->GeneratePassageRegion( graph_->MapVersion(), request, result_nodes, topo_range_manager_, response)) {  // 根据搜索得到的结果集设置路径
+	    SetErrorCode(ErrorCode::ROUTING_ERROR_RESPONSE, "Failed to generate passage regions based on result lanes", response->mutable_status());
+	    return false;
+	  }
+	  SetErrorCode(ErrorCode::OK, "Success!", response->mutable_status());	// 设置正确log
+
+	  PrintDebugData(result_nodes);  // 打印出搜索的结果节点
+	  return true;
+	}
+	// SearchRoute模块主要调用ShowRequestInfo，IsReady，Init分别初始化和检验，如果通过了就调用SearchRouteByStrategy函数来利用策略搜索路径，如果最后没有找到合适的结果或者最后结果无法更新路径，则返回错误。
+	// 所以其中的SearchRouteByStrategy就是比较关键的策略函数。
+
+
+
+	// SearchRouteByStrategy
+
+	bool Navigator::SearchRouteByStrategy(const TopoGraph* graph, const std::vector<const TopoNode*>& way_nodes,const std::vector<double>& way_s, std::vector<NodeWithRange>* const result_nodes) const {  
+										//输入图，节点集，s，目标结果vector
+	  std::unique_ptr<Strategy> strategy_ptr;	// 策略指针
+	  strategy_ptr.reset(new AStarStrategy(FLAGS_enable_change_lane_in_result));  // 这里装的是AStar算法，所以后面使用的Search也是A*
+	  result_nodes->clear();	// 清空结果
+	  std::vector<NodeWithRange> node_vec;	// 存储路径的一个容器
+	  for (size_t i = 1; i < way_nodes.size(); ++i) {	// 对于节点集的所有路径
+	    const auto* way_start = way_nodes[i - 1];  // 路径开始节点
+	    const auto* way_end = way_nodes[i];	// 路径结束节点
+	    double way_start_s = way_s[i - 1];	// 路径开始的S
+	    double way_end_s = way_s[i];		// 路径结束的S
+
+	    TopoRangeManager full_range_manager = topo_range_manager_;	// 对于该全连接管理器
+	    black_list_generator_->AddBlackMapFromTerminal(way_start, way_end, way_start_s, way_end_s, &full_range_manager); // 黑名单加入全连接管理器
+
+	    SubTopoGraph sub_graph(full_range_manager.RangeMap());	// 全连接管理器赋值给sub_graph
+	    const auto* start = sub_graph.GetSubNodeWithS(way_start, way_start_s);	// 获取sub_graph的起始节点
+	    if (start == nullptr) {	// 如果起始节点为空，说明没有找到
+	      AERROR << "Sub graph node is nullptr, origin node id: " << way_start->LaneId() << ", s:" << way_start_s;
+	      return false;
+	    }
+	    const auto* end = sub_graph.GetSubNodeWithS(way_end, way_end_s);	// 获取sub_graph的终止节点
+	    if (end == nullptr) {	// 如果终止节点为空，说明没有找到
+	      AERROR << "Sub graph node is nullptr, origin node id: " << way_end->LaneId() << ", s:" << way_end_s;
+	      return false;
+	    }
+
+	    std::vector<NodeWithRange> cur_result_nodes;	// 结果集
+	    if (!strategy_ptr->Search(graph, &sub_graph, start, end, &cur_result_nodes)) {	// 使用A*算法来搜索路径
+	      AERROR << "Failed to search route with waypoint from " << start->LaneId()  << " to " << end->LaneId();
+	      return false;
+	    }
+
+	    node_vec.insert(node_vec.end(), cur_result_nodes.begin(), cur_result_nodes.end());	// 节点集放入上一个节点的结束，当前路径的开始和结束
+	  }
+
+	  if (!MergeRoute(node_vec, result_nodes)) {		 // 这段的路径结合起来
+	    AERROR << "Failed to merge route.";
+	    return false;
+	  }
+	  return true;
+	}
+
+
+	//该函数主要目标是完成输入图以及节点集，得到搜索路径。对于节点集的每一对节点请求都需要做路径的规划，最后把路径之间merge起来。其中使用到了strategy中的算法A*来计算前后的路径。注：前后的节点对都来源于request请求。所以在求得了多个单条路径之后需要merge。
+
+
+
+	// MergeRoute
+
+	bool Navigator::MergeRoute(const std::vector<NodeWithRange>& node_vec, std::vector<NodeWithRange>* const result_node_vec) const {	// 输入为路径集合，目标结果集合
+	  for (const auto& node : node_vec) {	// 对于所有的路径集合
+	    if (result_node_vec->empty() || result_node_vec->back().GetTopoNode() != node.GetTopoNode()) {	// 如果结果集合为空（第一个循环）或者结果的最后一个节点不等于此次节点
+	      result_node_vec->push_back(node);	// 把节点merge进去
+	    } else {	// 说明节点重复了
+	      if (result_node_vec->back().EndS() < node.StartS()) {	// 已有结果node节点的结束时的S与此时的S之间还有距离，说明已经有间断
+	        AERROR << "Result route is not coninuous";
+	        return false;
+	      } else {	// 说明虽然节点重复了，但是两个节点是重叠的，所以合并成一个节点。这样让结果节点的back等于此时节点的结束
+	        result_node_vec->back().SetEndS(node.EndS());
+	      }
+	    }
+	  }
+	  return true;
+	}
+
+
+	// MergeRoute的主要工作就是把得到的路径，一段一段的连接在一起。连接的时候注意是否具有重复和间隔，最后得到的就是首尾可以连接的路径。
+
+	// Navigator总结
+	Navigator相对条理比较清晰，首先是一些辅助的判断函数作为request的判断，如果一切检验合格后就会根据request的节点对来调用决策函数，最后把每一次计算得到的节点对路径merge起来得到最终的路径计算，返回回去。所以最终能够得到一条结合request的路径。

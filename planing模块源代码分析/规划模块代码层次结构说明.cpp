@@ -125,10 +125,15 @@ apollo::cyber::NullType> > const&)::{lambda()#1}::operator()() const::{lambda()#
 
 
 
-2. 在Docker内部使用GDB调试
+4. 在Docker内部使用GDB调试
 gdb -q bazel-bin/modules/map/relative_map/navigation_lane_test
 1
 进入GDB调试界面后，使用l命令查看源代码，使用b 138在源代码第138行（可根据需要修改为自己所需的代码位置 ）设置断点，使用r命令运行navigation_lane_test程序，进入断点暂停后，使用p navigation_lane_查看当前变量值（可根据需要修改为其他变量名），使用n单步调试一条语句，使用s单步调试进入函数内部，使用c继续执行后续程序。如果哪个部分测试通不过，调试信息会立刻告诉你具体原因，可使用bt查看当前调用堆栈。
- ———————————————— 
-版权声明：本文为CSDN博主「知行合一2018」的原创文章，遵循CC 4.0 by-sa版权协议，转载请附上原文出处链接及本声明。
-原文链接：https://blog.csdn.net/davidhopper/article/details/82589722
+
+
+
+
+
+
+5. Under the Cyber RT framework, the update of the planning module is changed from the timer triggering mechanism to the message updating mechanism. In other words, a specific planner such as NaviPlanner of the planning module only works (via planning_base_->RunOnce (local_view_, &adc_trajectory_pb);) in the case where all three messages prediction::PredictionObstacles, canbus::Chassis and localization::LocalizationEstimate have arrived.
+It causes a problem for debugging the planning algorithm. Usually, a recorded data bag file only contains two types of messages: canbus::Chassis and localization::LocalizationEstimate; the prediction::PredictionObstacles messages doesn't exist in general. I

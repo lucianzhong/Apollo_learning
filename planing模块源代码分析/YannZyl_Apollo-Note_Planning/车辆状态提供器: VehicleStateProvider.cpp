@@ -1,8 +1,8 @@
  
 1. 
    提供当前无人车的各类状态信息，车辆状态提供器的输入包括定位数据Localization以及底盘信息Chassis
-
-    apollo/modules/common/vehicle_state/vehicle_state_provider.h
+   // apollo/modules/common/vehicle_state/vehicle_state_provider.cc
+   // apollo/modules/common/vehicle_state/vehicle_state_provider.h
     class VehicleStateProvider {
 	  ...
 	private:
