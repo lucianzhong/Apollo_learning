@@ -1,41 +1,34 @@
- 
+ Reference:
+ https://github.com/YannZyl/Apollo-Note/blob/master/docs/planning/frame.md
+
 // apollo 3.0
 
 
- 1. 
- 在Frame类中，主要的工作还是对障碍物预测轨迹(由Predition模块得到的未来5s内障碍物运动轨迹)、无人车参考线(ReferenceLineProvider类提供)以及当前路况(停车标志、人行横道、减速带等)信息进行融合。
+1.  在Frame类中，主要的工作还是对障碍物预测轨迹(由Predition模块得到的未来5s内障碍物运动轨迹)、无人车参考线(ReferenceLineProvider类提供)以及当前路况(停车标志、人行横道、减速带等)信息进行融合。
+	实际情况下，能影响无人车运动的不一定只有障碍物，同时还有各个路况，举个例子：
 
-实际情况下，能影响无人车运动的不一定只有障碍物，同时还有各个路况，举个例子：
+	a. 障碍物影响
+		情况1：无人车车后的障碍物，对无人车没太大影响，可以忽略
+		情况2：无人车前面存在障碍物，无人车就需要停车或者超车
 
-a. 障碍物影响
+	b. 路况影响
+		情况3：前方存在禁停区或者交叉路口(不考虑信号灯)，那么无人车在参考线上行驶，禁停区区域不能停车
+		情况4：前方存在人行横道，若有人，那么需要停车；若没人，那么无人车可以驶过
 
-情况1：无人车车后的障碍物，对无人车没太大影响，可以忽略
+	所以综上所述，其实这章节最重要的工作就是结合路况和障碍物轨迹，给每个障碍物(为了保持一致，路况也需要封装成障碍物形式)一个标签，这个标签表示该障碍物存在情况下对无人车的影响，例如有些障碍物可忽略，有些障碍物会促使无人车超车，有些障碍物促使无人车需要停车等。
 
-情况2：无人车前面存在障碍物，无人车就需要停车或者超车
-
-b. 路况影响
-
-情况3：前方存在禁停区或者交叉路口(不考虑信号灯)，那么无人车在参考线上行驶，禁停区区域不能停车
-
-情况4：前方存在人行横道，若有人，那么需要停车；若没人，那么无人车可以驶过
-
-所以综上所述，其实这章节最重要的工作就是结合路况和障碍物轨迹，给每个障碍物(为了保持一致，路况也需要封装成障碍物形式)一个标签，这个标签表示该障碍物存在情况下对无人车的影响，例如有些障碍物可忽略，有些障碍物会促使无人车超车，有些障碍物促使无人车需要停车等。
-
-障碍物信息的获取策略
-无人车参考线ReferenceLineInof初始化(感知模块障碍物获取)
-依据交通规则对障碍物设定标签(原始感知障碍物&&路况障碍物)
+		1.障碍物信息的获取策略
+		2.无人车参考线ReferenceLineInof初始化(感知模块障碍物获取)
+		3.依据交通规则对障碍物设定标签(原始感知障碍物&&路况障碍物)
 
 
 
+2.  // 障碍物信息的获取策略--滞后预测(Lagged Prediction)
 
-2.  障碍物信息的获取策略--滞后预测(Lagged Prediction)
+	主要的工作是获取Prediction模块发布的障碍物预测轨迹数据，并且进行后处理工作
 
-主要的工作是获取Prediction模块发布的障碍物预测轨迹数据，并且进行后处理工作
-
-
-Prediction模块发布的数据格式：
-apollo/modules/prediction/proto/prediction_obstacle.proto
-
+	Prediction模块发布的数据格式：
+	// apollo/modules/prediction/proto/prediction_obstacle.proto
 
 	message Trajectory {
 	  optional double probability = 1;  // probability of this trajectory //障碍物该轨迹运动方案的概率
@@ -54,229 +47,183 @@ apollo/modules/prediction/proto/prediction_obstacle.proto
 	message PredictionObstacles {
 	  // timestamp is included in header
 	  optional apollo.common.Header header = 1;
-
 	  // make prediction for multiple obstacles
 	  repeated PredictionObstacle prediction_obstacle = 2;
-
 	  // perception error code
 	  optional apollo.common.ErrorCode perception_error_code = 3;
-
 	  // start timestamp
 	  optional double start_timestamp = 4;
-
 	  // end timestamp
 	  optional double end_timestamp = 5;
 	}
 
-
-	可以使用prediction_obstacles.prediction_obstacle()形式获取所有障碍物的轨迹信息，对于每个障碍物prediction_obstacle，可以使用prediction_obstacle.trajectory()获取他所有可能运动方案/轨迹
+	可以使用prediction_obstacles.prediction_obstacle()形式获取所有障碍物的轨迹信息，对于每个障碍物 prediction_obstacle ，可以使用prediction_obstacle.trajectory()获取他所有可能运动方案/轨迹
 
 	可以使用const auto& prediction = *(AdapterManager::GetPrediction());来获取Adapter中所有已发布的历史消息，最常见的肯定是取最近发布的PredictionObstacles(prediction.GetLatestObserved())，
-	 但是Apollo中采用更为精确地障碍物预测获取方式--滞后预测(Lagged Prediction)，除了使用Prediction模块最近一次发布的信息，同时还是用历史信息中的障碍物轨迹预测数据
+	但是Apollo中采用更为精确地障碍物预测获取方式--滞后预测(Lagged Prediction)，除了使用Prediction模块最近一次发布的信息，同时还是用历史信息中的障碍物轨迹预测数据
 
 
+	// apollo/modules/planning/planning.cc
 
-	 apollo/modules/planning/planning.cc
+	Status Planning::InitFrame(const uint32_t sequence_num, const TrajectoryPoint& planning_start_point, const double start_time, const VehicleState& vehicle_state) {
+	  frame_.reset(new Frame(sequence_num, planning_start_point, start_time, vehicle_state, reference_line_provider_.get()));
+	  auto status = frame_->Init();
+	  if (!status.ok()) {
+	    AERROR << "failed to init frame:" << status.ToString();
+	    return status;
+	  }
+	  return Status::OK();
+	}
 
-	Status Planning::InitFrame(const uint32_t sequence_num,
-                           const TrajectoryPoint& planning_start_point,
-                           const double start_time,
-                           const VehicleState& vehicle_state) {
-  frame_.reset(new Frame(sequence_num, planning_start_point, start_time,
-                         vehicle_state, reference_line_provider_.get()));
-  auto status = frame_->Init();
-  if (!status.ok()) {
-    AERROR << "failed to init frame:" << status.ToString();
-    return status;
-  }
-  return Status::OK();
-}
-
-
-
-apollo/modules/planning/common/frame.cc
-
-Status Frame::Init() {
-  hdmap_ = hdmap::HDMapUtil::BaseMapPtr();
-  vehicle_state_ = common::VehicleStateProvider::instance()->vehicle_state();
-  const auto &point = common::util::MakePointENU(
-      vehicle_state_.x(), vehicle_state_.y(), vehicle_state_.z());
-  if (std::isnan(point.x()) || std::isnan(point.y())) {
-    AERROR << "init point is not set";
-    return Status(ErrorCode::PLANNING_ERROR, "init point is not set");
-  }
-  ADEBUG << "Enabled align prediction time ? : " << std::boolalpha
-         << FLAGS_align_prediction_time;
-
-  // prediction
-  if (FLAGS_enable_prediction && AdapterManager::GetPrediction() &&
-      !AdapterManager::GetPrediction()->Empty()) {
-    if (FLAGS_enable_lag_prediction && lag_predictor_) {
-      lag_predictor_->GetLaggedPrediction(&prediction_); //// 滞后预测策略，获取障碍物轨迹信息
-    } else {
-      prediction_.CopyFrom(
-          AdapterManager::GetPrediction()->GetLatestObserved());  // 不采用滞后预测策略，直接取最近一次Prediction模块发布的障碍物信息
-    }
-    if (FLAGS_align_prediction_time) {
-      AlignPredictionTime(vehicle_state_.timestamp(), &prediction_);
-    }
-    for (auto &ptr : Obstacle::CreateObstacles(prediction_)) {
-      AddObstacle(*ptr);
-    }
-  }
-  const auto *collision_obstacle = FindCollisionObstacle();
-  if (collision_obstacle) {
-    std::string err_str =
-        "Found collision with obstacle: " + collision_obstacle->Id();
-    apollo::common::monitor::MonitorLogBuffer buffer(&monitor_logger_);
-    buffer.ERROR(err_str);
-    return Status(ErrorCode::PLANNING_ERROR, err_str);
-  }
-  if (!CreateReferenceLineInfo()) {
-    AERROR << "Failed to init reference line info";
-    return Status(ErrorCode::PLANNING_ERROR,
-                  "failed to init reference line info");
-  }
-
-  return Status::OK();
-}
+	// apollo/modules/planning/common/frame.cc
+	Status Frame::Init() {
+	  hdmap_ = hdmap::HDMapUtil::BaseMapPtr();
+	  vehicle_state_ = common::VehicleStateProvider::instance()->vehicle_state();
+	  const auto &point = common::util::MakePointENU(vehicle_state_.x(), vehicle_state_.y(), vehicle_state_.z());
+	  if (std::isnan(point.x()) || std::isnan(point.y())) {
+	    AERROR << "init point is not set";
+	    return Status(ErrorCode::PLANNING_ERROR, "init point is not set");
+	  }
+	  ADEBUG << "Enabled align prediction time ? : " << std::boolalpha  << FLAGS_align_prediction_time;
+	  // prediction
+	  if (FLAGS_enable_prediction && AdapterManager::GetPrediction() && !AdapterManager::GetPrediction()->Empty()) {
+	    if (FLAGS_enable_lag_prediction && lag_predictor_) {
+	      lag_predictor_->GetLaggedPrediction(&prediction_);  // 滞后预测策略，获取障碍物轨迹信息
+	    } else {
+	      prediction_.CopyFrom(AdapterManager::GetPrediction()->GetLatestObserved());  // 不采用滞后预测策略，直接取最近一次Prediction模块发布的障碍物信息
+	    }
+	    if (FLAGS_align_prediction_time) {
+	      AlignPredictionTime(vehicle_state_.timestamp(), &prediction_);
+	    }
+	    for (auto &ptr : Obstacle::CreateObstacles(prediction_)) {
+	      AddObstacle(*ptr);
+	    }
+	  }
+	  const auto *collision_obstacle = FindCollisionObstacle();
+	  if (collision_obstacle) {
+	    std::string err_str = "Found collision with obstacle: " + collision_obstacle->Id();
+	    apollo::common::monitor::MonitorLogBuffer buffer(&monitor_logger_);
+	    buffer.ERROR(err_str);
+	    return Status(ErrorCode::PLANNING_ERROR, err_str);
+	  }
+	  if (!CreateReferenceLineInfo()) {
+	    AERROR << "Failed to init reference line info";
+	    return Status(ErrorCode::PLANNING_ERROR, "failed to init reference line info");
+	  }
+	  return Status::OK();
+	}
 
 
 
 
-采用滞后预测策略获取障碍物轨迹信息的主要步骤可分为：
-apollo/modules/planning/common/lag_prediction.cc
+3.  采用滞后预测策略获取障碍物轨迹信息的主要步骤可分为：
+	// apollo/modules/planning/common/lag_prediction.cc
 
-void LagPrediction::GetLaggedPrediction(PredictionObstacles* obstacles) const {
-  obstacles->mutable_prediction_obstacle()->Clear();
-  if (!AdapterManager::GetPrediction() ||
-      AdapterManager::GetPrediction()->Empty()) {
-    return;
-  }
-  const auto& prediction = *(AdapterManager::GetPrediction());
-  if (!AdapterManager::GetLocalization() ||
-      AdapterManager::GetLocalization()->Empty()) {  // no localization
-    obstacles->CopyFrom(prediction.GetLatestObserved());
-    return;
-  }
+	void LagPrediction::GetLaggedPrediction(PredictionObstacles* obstacles) const {
+	  obstacles->mutable_prediction_obstacle()->Clear();
+	  if (!AdapterManager::GetPrediction() || AdapterManager::GetPrediction()->Empty()) {
+	    return;
+	  }
+	  const auto& prediction = *(AdapterManager::GetPrediction());
+	  if (!AdapterManager::GetLocalization() ||  AdapterManager::GetLocalization()->Empty()) {  // no localization
+	    obstacles->CopyFrom(prediction.GetLatestObserved());
+	    return;
+	  }
 
-   // Step A. 最近一次发布的障碍物轨迹预测信息处理
-  const auto adc_position =  AdapterManager::GetLocalization()->GetLatestObserved().pose().position();
-  const auto latest_prediction = (*prediction.begin());						// // 记录最近一次Prediction模块发布的信息
-  const double timestamp = latest_prediction->header().timestamp_sec();			// 最近一次发布的时间戳
+	   // Step A. 最近一次发布的障碍物轨迹预测信息处理
+	  const auto adc_position =  AdapterManager::GetLocalization()->GetLatestObserved().pose().position();
+	  const auto latest_prediction = (*prediction.begin());						// // 记录最近一次Prediction模块发布的信息
+	  const double timestamp = latest_prediction->header().timestamp_sec();			// 最近一次发布的时间戳
+	  std::unordered_set<int> protected_obstacles;
+	  for (const auto& obstacle : latest_prediction->prediction_obstacle()) {		// 获取最近一次发布的数据中，每个障碍物的运动轨迹信息
+	    const auto& perception = obstacle.perception_obstacle();
+	    if (perception.confidence() < FLAGS_perception_confidence_threshold &&   perception.type() != PerceptionObstacle::VEHICLE) {  // 障碍物置信度必须大于0.5，获取必须是车辆VEHICLE类，否则不作处理
+	      continue;
+	    }
+	    double distance = common::util::DistanceXY(perception.position(), adc_position);
+	    if (distance < FLAGS_lag_prediction_protection_distance) {				// 障碍物与车辆之间的距离小于30m，才设置有效
+	      protected_obstacles.insert(obstacle.perception_obstacle().id());
+	      // add protected obstacle
+	      AddObstacleToPrediction(0.0, obstacle, obstacles);
+	    }
+	  }
 
-  std::unordered_set<int> protected_obstacles;
-  for (const auto& obstacle : latest_prediction->prediction_obstacle()) {		// 获取最近一次发布的数据中，每个障碍物的运动轨迹信息
-    const auto& perception = obstacle.perception_obstacle();
-    if (perception.confidence() < FLAGS_perception_confidence_threshold &&   perception.type() != PerceptionObstacle::VEHICLE) {  // 障碍物置信度必须大于0.5，获取必须是车辆VEHICLE类，否则不作处理
-      continue;
-    }
-    double distance =
-        common::util::DistanceXY(perception.position(), adc_position);
-    if (distance < FLAGS_lag_prediction_protection_distance) {				// 障碍物与车辆之间的距离小于30m，才设置有效
-      protected_obstacles.insert(obstacle.perception_obstacle().id());
-      // add protected obstacle
-      AddObstacleToPrediction(0.0, obstacle, obstacles);
-    }
-  }
+	  // Step B 过往发布的历史障碍物轨迹预测信息处理
+	  std::unordered_map<int, LagInfo> obstacle_lag_info;
+	  int index = 0;  // data in begin() is the most recent data
+	  for (auto it = prediction.begin(); it != prediction.end(); ++it, ++index) {		// 对于每一次发布的信息进行处理
+	    for (const auto& obstacle : (*it)->prediction_obstacle()) {		// 获取该次发布的历史数据中，每个障碍物的运动轨迹信息
+	      const auto& perception = obstacle.perception_obstacle();
+	      auto id = perception.id();
+	      if (perception.confidence() < FLAGS_perception_confidence_threshold &&  perception.type() != PerceptionObstacle::VEHICLE) {  // 障碍物置信度必须大于0.5，获取必须是车辆VEHICLE类，否则不作处理
+	        continue;
+	      }			
+	      if (protected_obstacles.count(id) > 0) {    // 如果障碍物在最近一次发布的信息中出现了，那就忽略，因为只考虑最新的障碍物信息
+	        continue;  // don't need to count the already added protected obstacle
+	      }
+	      auto& info = obstacle_lag_info[id];
+	      ++info.count;				//// 记录障碍物在所有历史信息中出现的次数
+	      if ((*it)->header().timestamp_sec() > info.last_observed_time) {   // 保存最近一次出现的信息，因为只考虑最新的障碍物信息
+	        info.last_observed_time = (*it)->header().timestamp_sec();
+	        info.last_observed_seq = index;
+	        info.obstacle_ptr = &obstacle;
+	      }
+	    }
+	  }
 
+	  obstacles->mutable_header()->CopyFrom(latest_prediction->header());
+	  obstacles->mutable_header()->set_module_name("lag_prediction");
+	  obstacles->set_perception_error_code(latest_prediction->perception_error_code());
+	  obstacles->set_start_timestamp(latest_prediction->start_timestamp());
+	  obstacles->set_end_timestamp(latest_prediction->end_timestamp());
+	  bool apply_lag = std::distance(prediction.begin(), prediction.end()) >= static_cast<int32_t>(min_appear_num_);
+	  for (const auto& iter : obstacle_lag_info) {
+	    if (apply_lag && iter.second.count < min_appear_num_) {		 // 历史信息中如果障碍物出现次数小于min_appear_num_/3次，次数太少，可忽略。
+	      continue;
+	    }
+	    if (apply_lag && iter.second.last_observed_seq > max_disappear_num_) {   // 历史信息中如果障碍物最近一次发布距离现在过远，可忽略。
+	      continue;
+	    }
+	    AddObstacleToPrediction(timestamp - iter.second.last_observed_time, *(iter.second.obstacle_ptr), obstacles);
+	  }
+	}
 
-  // Step B 过往发布的历史障碍物轨迹预测信息处理
-  std::unordered_map<int, LagInfo> obstacle_lag_info;
-  int index = 0;  // data in begin() is the most recent data
-  for (auto it = prediction.begin(); it != prediction.end(); ++it, ++index) {		// 对于每一次发布的信息进行处理
-    for (const auto& obstacle : (*it)->prediction_obstacle()) {		// 获取该次发布的历史数据中，每个障碍物的运动轨迹信息
-      const auto& perception = obstacle.perception_obstacle();
-      auto id = perception.id();
-      if (perception.confidence() < FLAGS_perception_confidence_threshold &&  perception.type() != PerceptionObstacle::VEHICLE) {			// 障碍物置信度必须大于0.5，获取必须是车辆VEHICLE类，否则不作处理
-        continue;
-      }			
-      if (protected_obstacles.count(id) > 0) {    // 如果障碍物在最近一次发布的信息中出现了，那就忽略，因为只考虑最新的障碍物信息
-        continue;  // don't need to count the already added protected obstacle
-      }
-      auto& info = obstacle_lag_info[id];
-      ++info.count;				//// 记录障碍物在所有历史信息中出现的次数
-      if ((*it)->header().timestamp_sec() > info.last_observed_time) {   // 保存最近一次出现的信息，因为只考虑最新的障碍物信息
-        info.last_observed_time = (*it)->header().timestamp_sec();
-        info.last_observed_seq = index;
-        info.obstacle_ptr = &obstacle;
-      }
-    }
-  }
+	所以最后做一个总结，对于历史发布数据，如何判断这些障碍物轨迹信息是否有效。两个步骤：
 
- obstacles->mutable_header()->CopyFrom(latest_prediction->header());
-  obstacles->mutable_header()->set_module_name("lag_prediction");
-  obstacles->set_perception_error_code(
-      latest_prediction->perception_error_code());
-  obstacles->set_start_timestamp(latest_prediction->start_timestamp());
-  obstacles->set_end_timestamp(latest_prediction->end_timestamp());
-  bool apply_lag = std::distance(prediction.begin(), prediction.end()) >=
-                   static_cast<int32_t>(min_appear_num_);
-  for (const auto& iter : obstacle_lag_info) {
-    if (apply_lag && iter.second.count < min_appear_num_) {		 // 历史信息中如果障碍物出现次数小于min_appear_num_/3次，次数太少，可忽略。
-      continue;
-    }
-    if (apply_lag && iter.second.last_observed_seq > max_disappear_num_) {   // 历史信息中如果障碍物最近一次发布距离现在过远，可忽略。
-      continue;
-    }
-    AddObstacleToPrediction(timestamp - iter.second.last_observed_time,
-                            *(iter.second.obstacle_ptr), obstacles);
-  }
-}
+	步骤1：记录历史发布数据中每个障碍物出现的次数(在最近依次发布中出现的障碍物忽略，因为不是最新的数据了)，必须满足两个条件：
+		障碍物置信度(Perception模块CNN分割获得)必须大于0.5，或者障碍物是车辆类
+		障碍物与车辆之间的距离小于30m
 
-
-最近一次发布的数据直接加入PredictionObstacles容器中
-从上面的代码可以看到，滞后预测对于最近一次发布的数据处理比较简单，障碍物信息有效只需要满足两个条件：
-
-障碍物置信度(Perception模块CNN分割获得)必须大于0.5，或者障碍物是车辆类
-障碍物与车辆之间的距离小于30m
-
-
-如何判断这些障碍物轨迹信息是否有效。两个步骤：
-
-步骤1：记录历史发布数据中每个障碍物出现的次数(在最近依次发布中出现的障碍物忽略，因为不是最新的数据了)，必须满足两个条件：
-
-障碍物置信度(Perception模块CNN分割获得)必须大于0.5，或者障碍物是车辆类
-障碍物与车辆之间的距离小于30m
-步骤2：对于步骤1中得到的障碍物信息，进行筛选，信息有效需要满足两个条件：
-
-信息队列中历史数据大于3(min_appear_num_)，并且每个障碍物出现次数大于3(min_appear_num_)
-信息队列中历史数据大于3(min_appear_num_)，并且障碍物信息上一次发布距离最近一次发布不大于5(max_disappear_num_)，需要保证数据的最近有效性。
+	步骤2：对于步骤1中得到的障碍物信息，进行筛选，信息有效需要满足两个条件：
+		信息队列中历史数据大于3(min_appear_num_)，并且每个障碍物出现次数大于3(min_appear_num_)
+		信息队列中历史数据大于3(min_appear_num_)，并且障碍物信息上一次发布距离最近一次发布不大于5(max_disappear_num_)，需要保证数据的最近有效性。
 
 
 
+4.  // 无人车与障碍物相对位置的设置--ReferenceLineInfo类初始化
 
+	从障碍物信息的获取策略--滞后预测(Lagged Prediction)中可以得到障碍物短期(未来5s)内的运动轨迹；从ReferenceLineProvider类中我们可以得到车辆的理想规划轨迹
+	下一步就是将障碍物的轨迹信息加入到这条规划好的参考线ReferenceLine中，确定在什么时间点，无人车能前进到什么位置，需要保证在这个时间点上，障碍物与无人车不相撞。这个工作依旧是在Frame::Init()中完成，主要是完成ReferenceLineInfo类的生成，这个类综合了障碍物预测轨迹与无人车规划轨迹的信息，同时也是最后路径规划的基础类
 
-3. 无人车与障碍物相对位置的设置--ReferenceLineInfo类初始化
-
-	从**1. 障碍物信息的获取策略--滞后预测(Lagged Prediction)**中可以得到障碍物短期(未来5s)内的运动轨迹；从ReferenceLineProvider类中我们可以得到车辆的理想规划轨迹。
-	下一步就是将障碍物的轨迹信息加入到这条规划好的参考线ReferenceLine中，确定在什么时间点，无人车能前进到什么位置，需要保证在这个时间点上，障碍物与无人车不相撞。
-	这个工作依旧是在Frame::Init()中完成，主要是完成ReferenceLineInfo类的生成，这个类综合了障碍物预测轨迹与无人车规划轨迹的信息，同时也是最后路径规划的基础类
-
-
-apollo/modules/planning/common/frame.cc
+	// apollo/modules/planning/common/frame.cc
 
 	Status Frame::Init() {
 		  hdmap_ = hdmap::HDMapUtil::BaseMapPtr();
 		  vehicle_state_ = common::VehicleStateProvider::instance()->vehicle_state();
-		  const auto &point = common::util::MakePointENU(
-		      vehicle_state_.x(), vehicle_state_.y(), vehicle_state_.z());
+		  const auto &point = common::util::MakePointENU(vehicle_state_.x(), vehicle_state_.y(), vehicle_state_.z());
 		  if (std::isnan(point.x()) || std::isnan(point.y())) {
 		    AERROR << "init point is not set";
 		    return Status(ErrorCode::PLANNING_ERROR, "init point is not set");
 		  }
-		  ADEBUG << "Enabled align prediction time ? : " << std::boolalpha
-		         << FLAGS_align_prediction_time;
+		  ADEBUG << "Enabled align prediction time ? : " << std::boolalpha << FLAGS_align_prediction_time;
 
-		  // prediction
-		         // Step A prediction，障碍物预测轨迹信息获取，采用滞后预测策略
-		  if (FLAGS_enable_prediction && AdapterManager::GetPrediction() &&
-		      !AdapterManager::GetPrediction()->Empty()) {
+		 // prediction
+		 // Step A prediction，障碍物预测轨迹信息获取，采用滞后预测策略
+		  if (FLAGS_enable_prediction && AdapterManager::GetPrediction() && !AdapterManager::GetPrediction()->Empty()) {
 		    if (FLAGS_enable_lag_prediction && lag_predictor_) {
 		      lag_predictor_->GetLaggedPrediction(&prediction_);
 		    } else {
-		      prediction_.CopyFrom(
-		          AdapterManager::GetPrediction()->GetLatestObserved());
+		      prediction_.CopyFrom(AdapterManager::GetPrediction()->GetLatestObserved());
 		    }
 		    if (FLAGS_align_prediction_time) {
 		      AlignPredictionTime(vehicle_state_.timestamp(), &prediction_);
@@ -286,8 +233,7 @@ apollo/modules/planning/common/frame.cc
 		    }
 		  }
 
-
-		    // Step B.1 检查当前时刻(relative_time=0.0s)，无人车位置和障碍物位置是否重叠(相撞)，如果是，可以直接退出
+		 // Step B.1 检查当前时刻(relative_time=0.0s)，无人车位置和障碍物位置是否重叠(相撞)，如果是，可以直接退出
 		  const auto *collision_obstacle = FindCollisionObstacle();
 		  if (collision_obstacle) {
 		    std::string err_str = "Found collision with obstacle: " + collision_obstacle->Id();
@@ -301,24 +247,21 @@ apollo/modules/planning/common/frame.cc
 		    AERROR << "Failed to init reference line info";
 		    return Status( ErrorCode::PLANNING_ERROR, "failed to init reference line info");
 		  }
-
 		  return Status::OK();
 		}
 
 
-		如何完成ReferenceLineInfo类的初始化工作，其实比较简单，主要有两个过程：
+	如何完成 ReferenceLineInfo 类的初始化工作，其实比较简单，主要有两个过程：
 
 		1.根据无人车规划路径ReferenceLine实例化ReferenceLineInfo类，数量与ReferenceLine一致
 		2.根据障碍物轨迹初始化ReferenceLineInfo::path_decision_
 
 	
-	1. 实例化ReferenceLineInfo类:
-
+	// 1. 实例化ReferenceLineInfo类:
 	apollo/modules/planning/common/frame.cc
 
 		bool Frame::CreateReferenceLineInfo() {
-
-			 // Step A 从ReferenceLineProvider中获取无人车的短期内规划路径ReferenceLine，并进行收缩操作
+		  // Step A 从ReferenceLineProvider中获取无人车的短期内规划路径ReferenceLine，并进行收缩操作
 		  std::list<ReferenceLine> reference_lines;
 		  std::list<hdmap::RouteSegments> segments;
 		  if (!reference_line_provider_->GetReferenceLines( &reference_lines, &segments )) {
@@ -329,8 +272,7 @@ apollo/modules/planning/common/frame.cc
 
 
 
-		  auto forword_limit =
-		      ReferenceLineProvider::LookForwardDistance(vehicle_state_);
+		  auto forword_limit =  ReferenceLineProvider::LookForwardDistance(vehicle_state_);
 
 		  for (auto &ref_line : reference_lines) {
 		    if (!ref_line.Shrink(Vec2d(vehicle_state_.x(), vehicle_state_.y()),
@@ -401,6 +343,9 @@ apollo/modules/planning/common/frame.cc
 
 
 
+
+
+
 		/apollo/modules/planning/common/reference_line_info.cc
 
 		bool ReferenceLineInfo::Init(const std::vector<const Obstacle*>& obstacles) {
@@ -458,6 +403,9 @@ apollo/modules/planning/common/frame.cc
 
 		除了将障碍物信息加入到类中，还有一个重要的工作就是确定某个时间点无人车能前进到的位置,
 		可以看到这个过程其实就是根据障碍物的轨迹(某个相对时间点，障碍物运动到哪个坐标位置)，并结合无人车查询得到的理想路径，得到某个时间点low_t和high_t无人车行驶距离的下界low_s-adc_start_s和上界high_s-adc_start_s
+
+
+		
 
 		/// file in apollo/modules/planning/common/reference_line_info.cc
 		// AddObstacle is thread safe
