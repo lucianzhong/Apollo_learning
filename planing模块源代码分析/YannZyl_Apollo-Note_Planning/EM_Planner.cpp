@@ -1455,8 +1455,37 @@ em_planner_config {
 	其实上面已经给了基于动态规划解决方案的速度规划器，思路也比较简单，虽然能预测到每个相对时间点t无人车的位置s，但是动态规划版本的速度规划器对无人车的速度v、加速度a以及方向theta等信息处理能力较弱，只能通过临近几个st节点来估测，存在偏差。而基于二次规划QP的速度规划器，实用多项式拟合st点，得到多项式函数，这时候就可以根据导数求速度，二阶导求加速度等信息。也可以参考官方文档
 	在指引线提供器: ReferenceLineProvider中，我们已经给出了基于二次规划QP的参考线平滑技术，这里的速度规划其实与参考线平滑很类似，主要的步骤分为：
 
-	// 1. 预处理
 
+	// 1. 预处理
+	参考线平滑中的预处理工作是采样，也就是决定设置多少节点knots，每两个knots节点中间采集多少个拟合点；在QP速度规划器中，预处理工作就和DP规划器一样，生成障碍物所有预测时刻的st边界框，设置不同区域的限速。
+	速度规划器中设置了4段，共8s时间，所以应该是5个knots，分别对应0,2,4,6,8s。但是代码中有个疑惑，存储了4个knots(t_knots_.size(): 4)，后面计算段函数的时候依旧使用t_knots_.size()，导致了少1，所以是够在这里有存在问题？因此每段同样使用一个5次多项式去拟合。可以得到一下信息：
+
+	4段共4个5次多项式拟合函数，每个函数定义域为[0,2]。(spline_order_: 5)
+	拟合多项式共包含参数: 4 * (5+1)
+
+
+	// apollo/modules/planning/tasks/qp_spline_st_speed/qp_spline_st_graph.cc
+
+	void QpSplineStGraph::Init() {
+	  // init knots
+	  double curr_t = 0.0;
+	  uint32_t num_spline =  qp_st_speed_config_.qp_spline_config().number_of_discrete_graph_t() - 1;  // num_spline = 3 
+	  for (uint32_t i = 0; i <= num_spline; ++i) {
+	    t_knots_.push_back(curr_t);
+	    curr_t += t_knots_resolution_;
+	  }
+	  uint32_t num_evaluated_t = 10 * num_spline + 1;
+	  // init evaluated t positions
+	  curr_t = 0;
+	  t_evaluated_resolution_ = qp_st_speed_config_.total_time() / (num_evaluated_t - 1);
+	  for (uint32_t i = 0; i < num_evaluated_t; ++i) {
+	    t_evaluated_.push_back(curr_t);
+	    curr_t += t_evaluated_resolution_;
+	  }
+	}
+
+	这段代码有疑惑，下面knots生成的过程中，t_knots_的数量比num_spline多1，那么明显num_spline代表了拟合过程中使用多少段函数，为什么需要减去1？而且t_knots_的存储记录为[0,2,4,6]，所以只能规划未来6s内的(t,s)。
+	但在后续采样t_evaluated_的时候又使用了total_time 8s来计算。所以这里有点困惑，是不是应该num_spline就等于number_of_discrete_graph_t呢？
 
 
 
