@@ -5,15 +5,14 @@
 1. // 规划与控制地图: Pnc Map
 	pnc map其实和高精地图hd map没有关系，后者是专门为规划与控制模块设计的库函数，在hd map层次之上，负责一些地图相关信息的处理。例如查询车辆可能的形式路由段(list)，然后对每个路由段合成一个路径Path，这是pnc map最重要的功能。
 	pnc map目前被封装在指引线提供器ReferenceLineProvider中，但是由于其功能比较集中，我们单独将他拿出来讲解。规划控制地图pnc map主要的功能有三个：
-
-		更新路由信息。这部分接受Routing模块的路径查询响应，将其响应信息处理存储到地图类中
-		短期路径段查询。根据Routing规划路径以及当前车辆的位置，计算当前车辆可行驶的车道区域
-		路径段生成最终路径。针对2中每个可行驶的车道路由段，生成一条路径Path，可以后续生成参考线Reference Line
+		1.更新路由信息。这部分接受Routing模块的路径查询响应，将其响应信息处理存储到地图类中
+		2.短期路径段查询。根据Routing规划路径以及当前车辆的位置，计算当前车辆可行驶的车道区域
+		3.路径段生成最终路径。针对2中每个可行驶的车道路由段，生成一条路径Path，可以后续生成参考线Reference Line
 
 
 2. // 更新路由信息 (PncMap::UpdateRoutingResponse)
 
-	modules/map/pnc_map/pnc_map.cc
+    // modules/map/pnc_map/pnc_map.cc
 
 	  bool PncMap::UpdateRoutingResponse(const routing::RoutingResponse &routing) {	//响应结果剥离,从上述代码可以响应结果剥离工作比较简单，就是对这条完整路径进行RoadSegment，Passage，LaneSegment的存储
 		  range_lane_ids_.clear();
