@@ -6,16 +6,12 @@
     class VehicleStateProvider {
 	  ...
 	private:
-	  common::VehicleState vehicle_state_;							// 车辆状态信息vehicle_state_
+	  common::VehicleState vehicle_state_;				// 车辆状态信息vehicle_state_
 	  localization::LocalizationEstimate original_localization_;	// 定位信息original_localization_
 	  // 这两个成员对应的类型都是以protobuf的形式定义，第二项original_localization_其实并不是主要成员，仅仅是记录上一次更新的Localization而已。第一项vehicle_state_才是完整保存车辆状态的载体
 	}
 
-
-	apollo/modules/common/vehicle_state/vehicle_state_provider.cc
-
-
-2.  modules/common/vehicle_state/proto/vehicle_state.proto
+2.  // modules/common/vehicle_state/proto/vehicle_state.proto
 
 	message VehicleState {
 	  optional double x = 1 [default =0.0];		// 车辆世界ENU坐标系x坐标
@@ -40,13 +36,27 @@
 3.  apollo/modules/common/vehicle_state/vehicle_state_provider.cc
 	
 	Status VehicleStateProvider::Update( const localization::LocalizationEstimate &localization, const canbus::Chassis &chassis ) //车辆状态更新函数VehicleStateProvider::Update
-	math::Vec2d VehicleStateProvider::EstimateFuturePosition(const double t) const		//根据当前车辆状态，给定一个时间t，来预测t时间后的车辆状态
+	math::Vec2d VehicleStateProvider::EstimateFuturePosition(const double t) const		//根据当前车辆状态，给定一个时间t，来预测t时间后的车辆状态，注意，这个时间t必须是短时间内的预测，如果t过大，预测将不会准确(因为预测前提是假定这个时间段内，车辆的速度、角速度等指标不变)
 
 
 
 4.  车辆状态更新函数( VehicleStateProvider::Update)
 	在函数VehicleStateProvider::ConstructExceptLinearVelocity中实现，即将localization中的信息抽取出来填充到vehicle_state_中
-
+	1.设置车辆姿态信息
+	在函数VehicleStateProvider::ConstructExceptLinearVelocity中实现，即将localization中的信息抽取出来填充到vehicle_state_中，设置的内容包含:
+	车辆坐标(x,y,z)
+	车辆速度方向heading
+	车辆xy平面角速度angular_velocity
+	车辆半径倒数kappa
+	车辆xyz方向旋转角roll, pitch, yaw
+	
+	2.设置车辆速度与时间戳信息
+	车辆速度linear_velocity
+	时间戳timestamp
+	
+	3.设置车辆底盘信息
+	齿轮信息gear
+	驾驶模式driving_mode
 
 5. 车辆未来时刻预测函数( VehicleStateProvider::EstimateFuturePosition)
 
@@ -60,8 +70,6 @@
 	    vehicle_state.set_y( future_xy.y() );
 	    vehicle_state.set_timestamp( start_timestamp );
 	  }
-
-
 
 	math::Vec2d VehicleStateProvider::EstimateFuturePosition(const double t) const {
 		  Eigen::Vector3d vec_distance(0.0, 0.0, 0.0);
