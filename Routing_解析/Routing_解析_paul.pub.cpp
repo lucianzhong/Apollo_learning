@@ -1,10 +1,21 @@
 
 Reference: https://paul.pub/apollo-routing/
-
+//  r 3.5.0
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+1. //Introduction
+	The Routing module generates high level navigation information based on requests.
+	The Routing module depends on a routing topology file, usually named routing_map.* in apollo.
+	The routing map can be genreated using this command:
+	bash scripts/generate_routing_topo_graph.sh
+	Input:
+	Map data
+	Routing request (Start and end location)
+	Output:
+	Routing navigation information
 
-1. modules/routing/common/routing_gflags.h
+2.  // 常量定义
+	// modules/routing/common/routing_gflags.h
 
 	DECLARE_string(routing_conf_file);
 	DECLARE_string(routing_node_name);
@@ -25,11 +36,19 @@ Reference: https://paul.pub/apollo-routing/
 
 
 
-2. Routing proto:
-   /apolloauto/modules/routing/proto:
+2.// Proto数据结构
+	Apollo项目中的很多数据结构都是通过Protocol Buffers定义的。所以你看不到这些类的C++文件，因为C++需要的相关文件是在编译时通过proto文件自动生成的。
+	Protocol Buffers是Google的开源项目。它具有语言无关，平台无关的特性，并且有很好的可扩展性。Protocol Buffers通常用于序列化结构化数据。
+	Apollo使用Protocol Buffers的一个很重要的作用是，用它来将结构化数据导出到物理文件中，并且也可以很方便的从物理文件中读取信息。例如，Routing模块需要的Topo地图就是proto结构导出的。另外，如果导出的是文本形式的文件，也可以方便的进行人为的修改。
+	例如，上面提到的routing_config.pb.txt。
+	proto文件都位于名称为proto的文件夹中，你可以通常下面这条命令在apollo源码的根目录下找到所有的proto文件夹：
+
+	apollo$ find . -name proto
+	这其中自然就包含了Routing模块的proto文件夹：modules/routing/proto
+	Routing proto:
+    // /apolloauto/modules/routing/proto:
 
 	// poi.proto
-
 	 Point of interest的缩写，一个POI中可以包含多个Landmark
 
 	 message Landmark {
@@ -43,10 +62,7 @@ Reference: https://paul.pub/apollo-routing/
 	}
 
 
-
-
 	// routing_config.proto
-
 	描述了Routing模块的配置信息，上面提到的routing_config.pb.txt文件就是这个格式的
 
 	message RoutingConfig {
@@ -60,6 +76,16 @@ Reference: https://paul.pub/apollo-routing/
 
 
 	//  routing.proto
+
+	类型名称	描述
+	LaneWaypoint	道路上的路径点，包含了id，长度和位置点信息。
+	LaneSegment	道路的一段，包含了id和起止点信息。
+	RoutingRequest	描述了路由请求的信息，一次路由请求可以包含多个路径点。详细结构见下文。
+	Measurement	描述测量的距离。
+	ChangeLaneType	道路的类型，有FORWARD，LEFT，RIGHT三种取值。
+	Passage	一段通路，其中可以包含多个LaneSegment，以及ChangeLaneType。
+	RoadSegment	道路的一段，拥有一个id，并可以包含多个Passage。
+	RoutingResponse	路由请求的响应结果，可以包含多个RoadSegment，距离等信息
 
 		// LaneWaypoint	道路上的路径点，包含了id，长度和位置点信息
 		message LaneWaypoint {
@@ -125,7 +151,13 @@ Reference: https://paul.pub/apollo-routing/
 
 
 
-	// topo_graph.proto
+	// topo_graph.proto	
+	类型名称	描述
+	CurvePoint	曲线上的一个点。
+	CurveRange	曲线上的一段。
+	Node	车道上的一个节点，包含了所属车道，道路，长度，曲线起止点，中心线等信息。
+	Edge	连接车道之间的边，包含了起止车道id，代价和方向等信息。
+	Graph	完整地图的Topo结构，这其中包含了多个Node和Edge。
 
 	// CurvePoint	曲线上的一个点
 	message CurvePoint {
@@ -174,12 +206,21 @@ Reference: https://paul.pub/apollo-routing/
 	  repeated Edge edge = 4;
 	}
 	                         
+  例如，Routing模块以及其他模块都需要用的数据结构就定义在modules/common/proto/目录下。这其中包含的proto文件如下：
 
+.
+├── drive_event.proto
+├── drive_state.proto
+├── error_code.proto
+├── geometry.proto
+├── header.proto
+├── pnc_point.proto
+└── vehicle_signal.proto
 
-3.  Topo地图
+3.  // Topo地图
 	为了计算路由路径，在Routing模块中包含一系列的类用来描述Topo地图的详细结构,简单来说，Topo地图中最重要的就是节点和边，节点对应了道路，边对应了道路的连接关系
 
-	/modules/routing/graph:
+	// /modules/routing/graph:
 
 	类名						描述
 
@@ -208,7 +249,7 @@ Reference: https://paul.pub/apollo-routing/
 
 
 4.
-	/modules/routing/graph/topo_node.cc
+	// /modules/routing/graph/topo_node.cc
 
 	Topo地图本质上是一系列的Topo节点以及它们的连接关系。因此TopoNode就要能够描述这些信息,有了这些信息之后，在进行路径搜索时，可以方便的查找线路
 
@@ -232,19 +273,43 @@ Reference: https://paul.pub/apollo-routing/
 
 
 
-5.	TopoCreator
+5.	// TopoCreator
 
-	/modules/routing/topo_creator/topo_creator.cc: 就是先读取配置文件中的信息到RoutingConfig中，然后通过GraphCreator根据高清地图文件生成Routing模块需要的Topo地图
+	// /modules/routing/topo_creator/topo_creator.cc: 就是先读取配置文件中的信息到RoutingConfig中，然后通过GraphCreator根据高清地图文件生成Routing模块需要的Topo地图
 
 	与人类开车时所使用的导航系统不一样，自动驾驶需要包含更加细致信息的高精地图，高精地图描述了整个行驶过程中物理世界的详细信息，例如：道路的方向，宽度，曲率，红绿灯的位置等等。而物理世界的这些状态是很容易会发生改变的，例如，添加了一条新的道路，或者是新的红绿灯。
 	这就要求高精地图也要频繁的更新。
 	那么Routing模块需要的地图文件也需要一起配套的跟着变化，这就很自然的需要有一个模块能够完成从原先的高精地图生成Routing模块的Proto格式地图这一转换工作。而完成这一工作的，就是TopoCreator模块就是先读取配置文件中的信息到RoutingConfig中，然后通过GraphCreator根据高清地图文件生成Routing模块需要的Topo地图
 
+	// apollo/modules/routing/topo_creator/topo_creator.cc
+	TopoCreator的源码位于modules/routing/topo_creator/目录下，这是一个可执行程序
+	
+	int main(int argc, char **argv) {
+		  google::InitGoogleLogging(argv[0]);
+		  google::ParseCommandLineFlags(&argc, &argv, true);
 
+		  apollo::routing::RoutingConfig routing_conf;
 
-6. Routing模块初始化
+		  CHECK(apollo::common::util::GetProtoFromFile(FLAGS_routing_conf_file,  //先读取配置文件中的信息到RoutingConfig中
+													   &routing_conf))
+			  << "Unable to load routing conf file: " + FLAGS_routing_conf_file;
 
-	apollo/modules/routing/routing.cc:
+		  AINFO << "Conf file: " << FLAGS_routing_conf_file << " is loaded.";
+
+		  const auto base_map = apollo::hdmap::BaseMapFile();
+		  const auto routing_map = apollo::hdmap::RoutingMapFile();
+
+		  apollo::routing::GraphCreator creator(base_map, routing_map, routing_conf);  // 然后通过GraphCreator根据高清地图文件生成Routing模块需要的Topo地图。
+		  CHECK(creator.Create()) << "Create routing topo failed!";
+
+		  AINFO << "Create routing topo successfully from " << base_map << " to "
+				<< routing_map;
+		  return 0;
+		}
+
+6. // Routing模块初始化
+
+	// apollo/modules/routing/routing.cc:
 	Routing模块通过Init方法来初始化。在初始化时，会创建Navigator对象以及加载地图
 
 	apollo::common::Status Routing::Init() {
@@ -255,7 +320,7 @@ Reference: https://paul.pub/apollo-routing/
 	  CHECK( cyber::common::GetProtoFromFile(FLAGS_routing_conf_file, &routing_conf_)) << "Unable to load routing conf file: " + FLAGS_routing_conf_file;
 	  AINFO << "Conf file: " << FLAGS_routing_conf_file << " is loaded.";
 
-	  hdmap_ = apollo::hdmap::HDMapUtil::BaseMapPtr(); //加载地图
+	  hdmap_ = apollo::hdmap::HDMapUtil::BaseMapPtr(); //加载地图  // Routing内部会通过Navigator来搜索路径。因为需要搜索路径，所以Navigator需要完整的Topo地图。在其构造函数中，会完成Topo地图的加载
 	  CHECK(hdmap_) << "Failed to load map file:" << apollo::hdmap::BaseMapFile();
 
 	  return apollo::common::Status::OK();
@@ -265,9 +330,9 @@ Reference: https://paul.pub/apollo-routing/
 
 
 
-7. Navigator的初始化
+7. // Navigator的初始化
 
-	apollo/modules/routing/core/navigator.cc
+	// apollo/modules/routing/core/navigator.cc
 
 	Routing内部会通过Navigator来搜索路径。因为需要搜索路径，所以Navigator需要完整的Topo地图。在其构造函数中，会完成Topo地图的加载
 
@@ -294,33 +359,32 @@ Reference: https://paul.pub/apollo-routing/
 
 
 
-8. 	路由请求:
+8. // 	路由请求:
 	bool Routing::Process(const std::shared_ptr<RoutingRequest> &routing_request, RoutingResponse* const routing_response);
 	// 一个是描述请求的输入参数routing_request，一个是包含结果的输出参数routing_response。它们都是在proto文件中定义的
 
 
 
-9. BlackMap
+9. // BlackMap
 	在一些情况下，地图可能会有信息缺失。在这种情况下，Routing模块支持动态的添加一些信息。这个逻辑主要是通过BlackListRangeGenerator和TopoRangeManager两个类完成的。这其中，前者提供了添加数据的接口，而后者则负责存储这些数据
 
 	modules/routing/core/black_list_range_generator.h
-
-	namespace apollo {
-	namespace routing {
-
+	
 	class BlackListRangeGenerator {
 	 public:
 	  BlackListRangeGenerator() = default;
 	  ~BlackListRangeGenerator() = default;
 
-	  void GenerateBlackMapFromRequest(const RoutingRequest& request, const TopoGraph* graph, TopoRangeManager* const range_manager) const; //GenerateBlackMapFromRequest：是从RoutingRequest包含的数据中添加
+	  void GenerateBlackMapFromRequest(const RoutingRequest& request,
+									   const TopoGraph* graph,
+									   TopoRangeManager* const range_manager) const;    // GenerateBlackMapFromRequest：是从RoutingRequest包含的数据中添加
 
-	  void AddBlackMapFromTerminal(const TopoNode* src_node, const TopoNode* dest_node, double start_s, double end_s, TopoRangeManager* const range_manager) const; //AddBlackMapFromTerminal：是从终端添加数据
+	  void AddBlackMapFromTerminal(const TopoNode* src_node,
+								   const TopoNode* dest_node, double start_s,
+								   double end_s,
+								   TopoRangeManager* const range_manager) const; // AddBlackMapFromTerminal：是从终端添加数据
 	};
-
-	}  // namespace routing
-	}  // namespace apollo
-
+	
 
 	这两个接口最后都会通过TopoRangeManager::Add接口来添加数据。该方法代码如下：
 
@@ -329,12 +393,12 @@ Reference: https://paul.pub/apollo-routing/
 	    range_map_[node].push_back(range);
 	}
 
-	TopoRangeManager中的数据最终会被ResultGenerator在组装搜索结果的时候用到
+	// TopoRangeManager中的数据最终会被ResultGenerator在组装搜索结果的时候用到
 
 
 
-10. 路由搜索过程
-
+10. // 路由搜索过程
+	前面我们提到了Navigator。如果你浏览了这个类的代码就会发现。Navigator本身并没有实现路径搜索的算法。它仅仅是借助其他类来完成路由路径的搜索过程
 	相关逻辑在Navigator::SearchRoute方法中
 
 	bool Navigator::SearchRoute(const RoutingRequest& request, RoutingResponse* const response) {
@@ -401,9 +465,32 @@ Reference: https://paul.pub/apollo-routing/
 		  optional bytes map_version = 5;
 		  optional apollo.common.StatusPb status = 6;
 		}
+		
+		
+		message Passage {
+		  repeated LaneSegment segment = 1;
+		  optional bool can_exit = 2;
+		  optional ChangeLaneType change_lane_type = 3 [default = FORWARD];
+		}
+
+		message RoadSegment {
+		  optional string id = 1;
+		  repeated Passage passage = 2;
+		}
+
+		message RoutingResponse {
+		  optional apollo.common.Header header = 1;
+		  repeated RoadSegment road = 2;
+		  optional Measurement measurement = 3;
+		  optional RoutingRequest routing_request = 4;
+
+		  // the map version which is used to build road graph
+		  optional bytes map_version = 5;
+		  optional apollo.common.StatusPb status = 6;
+		}
 
 
-13. AStarStrategy
+13. // AStarStrategy
 
 		Navigator::SearchRoute方法的第四步调用了类自身的SearchRouteByStrategy方法。在这个方法中，会借助AStarStrategy来完成路径的搜索。
 
