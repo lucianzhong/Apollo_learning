@@ -245,6 +245,8 @@ root@apollo5-apollo-ubuntu14-1:/apollo# find -name "kk.sh"
 ./scripts/kk.sh
 
 
+apollo/modules/common/data/global_flagfile.txt
+--map_dir=/apollo/modules/map/data/sunnyvale_with_two_offices
 
 11. 
 // cyber_recorder
