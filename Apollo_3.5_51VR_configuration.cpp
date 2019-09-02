@@ -239,7 +239,17 @@ need to mount the volume: paddlepaddle_volume-x86_64-1.0.0
 
 
 /////////////////////////////////////////////////////////////
-  
+  6. Hello, what is the output frequency of apollo 3.5 "/apollo/perception/obstacles"? I only input the data of lidar64 (not including lidar128/16, camera and radar), run the perception module, monitor with cyber_monitor, The frequency of "/apollo/perception/obstacles" is about 0.88 ~ 1. Why is it so low?
 
+Channels FrameRatio
+/apollo/localization/pose 100.05
+/apollo/perception/obstacles 0.91
+/apollo/sensor/camera/front_12mm/image 0.00
+/apollo/sensor/camera/front_6mm/image 0.00
+/apollo/sensor/velodyne64/compensator/PointCloud2 9.87
+/perception/camera_debug 0.00
+/perception/obstacles 0.00
+/tf 100.00
+/tf_static 0.00
 
 

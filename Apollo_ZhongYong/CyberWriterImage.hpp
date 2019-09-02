@@ -3,6 +3,9 @@
 //
 
 #pragma once
+#include <memory>
+
+class Imp;
 
 class CyberWriterImage
 {
@@ -12,9 +15,10 @@ public:
     EImageType_Short
   };
    CyberWriterImage(EImageType);
-   ~CyberWriterImage();
+   ~CyberWriterImage() = default;;
    void publish(int sequence, int width, int height, char* data) const;
 
 private:
-     std::shared_ptr<Imp> mImp;
+  EImageType mImageType;
+  std::shared_ptr<Imp> mImp;
 };

@@ -1,55 +1,60 @@
-#include "CyberWriterImage"
+
+
+#include "CyberWriterImage.hpp"
+//#include <ros/ros.h>
+//#include <sensor_msgs/Image.h>
+// bazel build //CyberBridge:libApolloCyber.so
+
+#include "CyberWriterImage.hpp"
 #include "cyber/cyber.h"
 #include "cyber/time/time.h"
 #include "modules/drivers/proto/sensor_image.pb.h"
+#include <iostream>
+#include <vector>
+
 
 
 class Imp
 {
 public:
-    std::shared_ptr<apollo::cyber::Writer<apollo::drivers::CompressedImage>> mWriter;
+    std::shared_ptr<apollo::cyber::Writer<apollo::drivers::Image>> mWriter;
 };
 
 
-
-
-CyberWriterImage::CyberWriterImage():mImp(std::make_shared<Imp>())
+CyberWriterImage::CyberWriterImage(EImageType imageType):mImp(std::make_shared<Imp>())
 {
-	apollo::cyber::Init("apollo_publish_Image");
-	auto node = apollo::cyber::CreateNode("writer");
-	  mImp->mWriter = node->CreateWriter<apollo::drivers::CompressedImage>("/apollo/sensor/Image");
+    apollo::cyber::Init("apollo_publish_image");
+    auto node = apollo::cyber::CreateNode("writer");
+    mImp->mWriter = node->CreateWriter<apollo::drivers::Image>(mImageType == EImageType_Long ? "/apollo/sensor/camera/traffic/image_long" : "/apollo/sensor/camera/traffic/image_short");
 }
 
 
 
-void CyberWriterImage::publish(int sequence, int width, int height, char* data) const{
+ void CyberWriterImage::publish(int sequence, int width, int height, char* data) const{
+        std::cout<<"publish Image"<<std::endl;
+            
+        auto ts = apollo::cyber::Time::Now().ToSecond();
+
+        auto Image = std::make_shared<apollo::drivers::Image>();
 
 
-	auto ts = apollo::cyber::Time::Now().ToSecond();
+        Image->mutable_header()->set_module_name("Image");
+        Image->mutable_header()->set_timestamp_sec(ts);
+        Image->mutable_header()->set_sequence_num(sequence);
 
+        Image->set_frame_id(mImageType == EImageType_Long ? "long_camera" : "short_camera");
 
-   auto Image = std::make_shared<apollo::drivers::CompressedImage>();
+        Image->set_width(width);
+        Image->set_height(height);
+        Image->set_encoding("bgr8");
 
-    // functions
-    // the header
-    PointCloud->mutable_header()->set_module_name("Image");
-    PointCloud->mutable_header()->set_timestamp_sec(ts);
+        Image->set_step( width*3);
+        
 
-   // image message
+       Image->set_data(data);
+        mImp->mWriter->Write(Image);
 
-
-    PointCloud->set_height
-    PointCloud->set_width
-    PointCloud->set_data
-
-	mImp->mWriter->Write(Image);
-
-}
-
-
-
-
-
+ }
 
 
 
@@ -58,55 +63,3 @@ void CyberWriterImage::publish(int sequence, int width, int height, char* data) 
 
 
 
-
-
-
-
-
-
-
-
-
-////////////////////////////////////////////////////////////////////////////
-
-//
-// Created By: Huiyong.Men 2018/07/24
-//
-
-#include "CyberWriterImage.hpp"
-//#include <ros/ros.h>
-//#include <sensor_msgs/Image.h>
-
-CyberWriterImage::CyberWriterImage(EImageType imageType) : mImageType(imageType)
-{
-    // int argc = 0;
-    // ros::init(argc, nullptr, mImageType == EImageType_Long ? "apollo_publish_image_long" : "apollo_publish_image_short");
-
-    // ros::NodeHandle handler;
-    // ros::Publisher *pPublisher = new ros::Publisher();
-    // *pPublisher = handler.advertise<sensor_msgs::Image>(mImageType == EImageType_Long ? "/apollo/sensor/camera/traffic/image_long" : "/apollo/sensor/camera/traffic/image_short", 10);
-    // mpPublisher = (void *)pPublisher;
-}
-
-CyberWriterImage::~CyberWriterImage()
-{
-    // if (mpPublisher)
-    //     delete (ros::Publisher *)mpPublisher;
-}
-
- void CyberWriterImage::publish(int sequence, int width, int height, char* data) const
-{
-    // sensor_msgs::Image img;
-    // img.header.seq = sequence;
-    // img.header.stamp = ros::Time::now();
-    // img.header.frame_id = mImageType == EImageType_Long ? "long_camera" : "short_camera";
-    // img.width = width;
-    // img.height = height;
-    // img.encoding = "bgr8";
-    // img.is_bigendian = false;
-    // img.step = img.width * 3;
-    // img.data.resize(img.step*height);
-    // memcpy(img.data.data(), data, img.step*height);
-    // ros::Publisher *pPublisher = (ros::Publisher *)mpPublisher;
-    // pPublisher->publish(img);
-}

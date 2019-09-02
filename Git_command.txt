@@ -45,7 +45,8 @@ git add ai.txt
 
 
 
-14.
+14.git pull --rebase upstream master
+	git reset --hard git reset --hard 2f308aac31e13a4c234e3b12010116333af398e6
 
 
 
