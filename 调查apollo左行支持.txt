@@ -1,0 +1,142 @@
+
+1. opendrive的左行地图支持
+
+	1.1 opendrive_offical
+	Reference:
+	https://www.vires.com/opencrg/docs/VIRES_ODR_OCRG.pdf
+
+	OpenDRIVE ® is based on XML; it allows for the exact description of simulated roads using the same elements that are
+	found in real roads (lines, curves, clothoids, (super-)elevation profiles, lanes, signals etc. ). It is compatible with rightand left-hand driving rules and can be localized in terms of signaling features. 
+
+	1.2 carla
+	Reference:
+	https://github.com/carla-simulator/carla/issues/1969
+	https://github.com/carla-simulator/carla/issues/1404
+
+	Hello.
+	l have made an OpenDRIVE map for left hand drive roads.
+	With this map, does get_waypoint() output a point ahead as we drive on the left side of the road?
+	I am asking this because OpenDRIVE map does not explicitly indicate driving directions except junctions
+
+	Yes. By Roadrunner. I used a left hand drive option in exporting to an OpenDRIVE file. Thank you.
+
+	1.3 SUMO
+	Reference:
+	http://sumo.sourceforge.net/userdoc/Z/Changes_from_Version_0.24.0_to_Version_0.25.0.html
+	https://sumo.dlr.de/wiki/NETCONVERT
+    
+    When importing a .net.xml which was built for left-hand traffic, the resulting network will also be built for left-hand traffic. // https://github.com/eclipse/sumo/issues/1880
+
+    --lefthand <BOOL>	Assumes left-hand traffic on the network; default: false
+
+    Lefthand Networks
+	By default, NETCONVERT assumes networks to follow right-hand traffic rules. When importing importing/building a network for a jurisdiction wiht left-hand traffic, the option --lefthand must be set.
+
+	Note, that this also influences geometries if the edges which make up a two-directional road are defined using the road-center-line as geometry. In right-hand networks the lane shapes will be placed to the right of the center line whereas in left-hand networks they will be placed to the left. This means that for some edges, the same input geometries can be used to build right-hand as well as left-hand networks. However, if the edge geometries are defined using the center-line of the directional edge (attribute {{XML|1=spreadType="center"/>) then the geometries are only useable for a specific type of jurisdiction (networks with the wrong setting for --lefthand will look strange).
+
+
+
+    结论:
+	opendrive 支持左行的道路结构，只要按照正常的流程建立相应的地图即可，左行和右行在地图中的区别主要是道路的方向和交通灯的位置
+
+
+2. 对worldeditor编辑左行路网的要求
+
+        Road Elements:  Road Boundary                                        
+						Lane Left Border                     
+						Right Lane Border 						                                     
+						Lane Centerline                      
+						Lane Speed Limit						                                      
+						Lane Type                           
+						Lane Topology 						                   
+						Lane Line Type						                  
+						Lane Direction Information 						                                      
+						Lane Steering Type						                                     
+						Lane Length
+
+
+		Intersection Elements: Intersection Boundary 
+							   Intersection Virtual Lanes
+
+
+		Traffic Signal Elements: Other Road Signs
+		 						 Traffic Light 
+
+
+		Logical Relationship Elements: Map Logical Relationship
+
+
+		Other Elements:  	Crosswalk
+		                    No Parking Area  
+							Stop Line 
+							Pavement Arrow 
+							Pavement Text 
+							Fence
+							Street Light 
+							Gantry
+							Building 
+							Deceleration Zone
+
+
+   Apollo hd_map 中包含的元素，在worldeditor建图的过程中，需要注意和左行有关的元素
+
+
+
+3. xodr adapter是否需要修改
+	地图的读取在adapter中，其中xml_parser目录提供解析xml的能力。而http://opendrive_adapter.cc则实现了地图的加载，转换为程序中的Map对象。然后地图在http://hdmap_impl.cc中提供一系列api接口给其他模块使用。
+
+	 初步的结论是adapter部分不需要改变
+
+
+
+4.  apollo内部是否区别对待左/右行
+
+	4.1
+	主要是处理宽敞道路是靠右行驶还是靠左行驶的问题：
+	/apollo/modules/planning/proto/reference_line_smoother_config.proto
+
+	message ReferenceLineSmootherConfig {
+	  enum DrivingSide {
+	    LEFT = 1;   // left hand driving country like UK and JP
+	    RIGHT = 2;  // right hand driving country like CN and US
+	  }
+	/apollo/modules/planning/reference_line/reference_line_provider.cc
+
+	  // shift to left (or right) on wide lanes
+	  if (smoother_config_.wide_lane_threshold_factor() > 0 &&
+	      total_width > adc_width * smoother_config_.wide_lane_threshold_factor()) {
+	    if (smoother_config_.driving_side() == ReferenceLineSmootherConfig::RIGHT) {
+	      shifted_left_width =
+	          adc_half_width +
+	          adc_width * smoother_config_.wide_lane_shift_remain_factor();
+	    } else {
+	      shifted_left_width = std::fmax(
+	          adc_half_width,
+	          total_width -
+	              (adc_half_width +
+	               adc_width * smoother_config_.wide_lane_shift_remain_factor()));
+	    }
+	  }
+
+
+
+	4.2
+	// apollo/modules/planning/tasks/traffic_decider/front_vehicle.cc
+
+	在planning的task中交通决策器中，关于前车处理的情况：从左边超车还是右边超车
+	
+	if (enter_sidepass_mode)
+	{ sidepass_status->set_status(SidePassStatus::SIDEPASS); sidepass_status->set_pass_obstacle_id(passable_obstacle_id); sidepass_status->clear_wait_start_time(); sidepass_status->set_pass_side(side); // 支持左超车还是右超车。取值为ObjectSidePass::RIGHT或ObjectSidePass::LEFT }
+
+
+
+
+	4.3
+	// Routing模块中cost计算时，左转和右转的权值设置
+	TopoCreator中读取routing_config.proto这个配置文件（ 源码位于modules/routing/topo_creator/ ）
+
+	// apollo/modules/routing/proto/routing_config.proto
+
+	message RoutingConfig
+
+	{ optional double base_speed = 1; // base speed for node creator [m/s] optional double left_turn_penalty = 2; // left turn penalty for node creater [m] optional double right_turn_penalty = 3; // right turn penalty for node creater [m] optional double uturn_penalty = 4; // left turn penalty for node creater [m] optional double change_penalty = 5; // change penalty for edge creater [m] optional double base_changing_length = 6; // base change length penalty for edge creater [m] }
