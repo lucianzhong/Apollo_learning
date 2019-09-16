@@ -1688,7 +1688,9 @@ The decisions(Yield/Overtake and etc) for moving obstacles are made by STGraph.
 we plan path first, and then speed based on path.
 Currently we don't have SL graph. We have SL info, but that's not enough to make decision for moving obstacles without dimension of T(time).
 
+ once the path has been planed, we make decision for moving obstacles based on STGraph, and a OVERTAKE/YIELD/STOP decision (which would be achieved via speed) would be made if their paths may cross ego vehicle  path.
 
+In your second graph, ADC may slowdown(follow) or yield to that moving obstacle depending on its path/speed/heading.
 
 
 
@@ -2119,14 +2121,1021 @@ I0325 13:34:29.917747 11486 lon_controller.cc:413] the last point found in path 
 Now I'm wondering if I have missed some important configuration, or it's just unable to test the control module without a real car (with real GPS message input)?
 
 
-Not as of now, but stay tuned ! :)
+Not as of now, but stay tuned ! 
 
 
 
 
 
 
-//
+// 导航模式下路径规划问题 #5805
+
+代码版本：apollo 3.0
+问题描述：
+在使用导航模式时，在dreamview里面仿真，打开相关模块，回放录制的数据包
+rosbag play /apollo/data/bag/2018-09-25-20-04-55.bag --topics /apollo/perception/obstacles /apollo/localization/pose /apollo/sensor/gnss/corrected_imu /apollo/sensor/gnss/imu /apollo/sensor/gnss/odometry /apollo/prediction /apollo/canbus/chassis
+当数据包已经播放完，但是planning模块、relative map模块仍有数据输出
+
+
+
+当在实车测试时，如果车已经到了终点，需要人手动关闭planning等相关模块吗？如果不关闭此时control模块仍不断接收planning模块输出的数据，车无法停止。
+
+在路测中，到达终点后需要人工接管。目前相对地图的逻辑是 完成指引线后，会继续延实时车道线自动驾驶
+
+
+从前面的提供的信息看，如果车行驶完通过指引线生成的道路后，会继续使用感知得到的信息生成实时车道线，如果想将车在行驶完通过指引线生成的道路停车，需要人工执行停车动作。我们想让车在行驶完通过指引线生成的道路停车，从code中看到在
+从planning模块中输出的/apollo/planning topic信息：
+decision {
+main_decision {
+stop {
+reason_code: STOP_REASON_DESTINATION
+reason: "stop by REF_END_0_Path from navigation line index 0"
+stop_point {
+x: 21.9748137816
+y: 0.106479256295
+}
+stop_heading: 0.00285595784381
+change_lane_type: FORWARD
+}
+}
+object_decision {
+decision {
+id: "REF_END_0_Path from navigation line index 0"
+perception_id: -1025593075
+object_decision {
+stop {
+reason_code: STOP_REASON_DESTINATION
+distance_s: -0.5
+stop_point {
+x: 21.9748137816
+y: 0.106479256295
+z: 0.0
+}
+stop_heading: 0.00285595784381
+}
+}
+}
+}
+vehicle_signal {
+turn_signal: TURN_NONE
+}
+}
+
+前面这个信息时一个停车的信号，但是这个信号不是在行驶结束发出，在行驶过程中就会通过planning 的topic输出。所以这个reason_code：STOP_REASON_DESTINATION，主要的功能是什么？主要是在dreamview上面显示停止信号？如果要实现行驶完指引线就停车，能否让control模块检测这个reason_code：STOP_REASON_DESTINATION实现停车功能？
+另外在code中发现apollo中将终点虚拟成一个obstacle，如果我们车在相对地图模式行驶过程中遇到前方有人或其他障碍物，控制车停车的信息也是通过planning的topic将reason_code发出吗？在potobuf文件中
+看到关于traffice rule的stop枚举其中有STOP_REASON_OBSTACLE，想请教一下apollo在相对地图这种模式中遇到障碍物control模块是从哪儿接收的停车信息
+
+
+/modules/planning/proto/decision.proto
+enum StopReasonCode {
+  STOP_REASON_HEAD_VEHICLE = 1;
+  STOP_REASON_DESTINATION = 2;
+  STOP_REASON_PEDESTRIAN = 3;
+  STOP_REASON_OBSTACLE = 4;
+  STOP_REASON_PREPARKING = 5;
+  STOP_REASON_SIGNAL = 100;  // only for red signal
+  STOP_REASON_STOP_SIGN = 101;
+  STOP_REASON_YIELD_SIGN = 102;
+  STOP_REASON_CLEAR_ZONE = 103;
+  STOP_REASON_CROSSWALK = 104;
+  STOP_REASON_CREEPER = 105;
+  STOP_REASON_REFERENCE_END = 106;  // end of the reference_line
+  STOP_REASON_YELLOW_SIGNAL = 107;  // yellow signal
+  STOP_REASON_PULL_OVER = 108;      // pull over
+  STOP_REASON_SIDEPASS_SAFETY = 109;
+  STOP_REASON_PRE_OPEN_SPACE_STOP = 200;
+  STOP_REASON_LANE_CHANGE_URGENCY = 201;
+}
+
+
+目前还不支持目的地停车。如果要修改这样的逻辑： 大概可以看下 3.0下的
+/planning/toolkits/deciders/destination.cc: 48行
+/planning/reference_line/reference_line_provider.cc: 408
+
+
+1、/home/alan/apollo/modules/map/pnc_map/route_segments.cc
+bool RouteSegments::StopForDestination() const { return stop_for_destination_; }
+
+void RouteSegments::SetStopForDestination(bool stop_for_destination) {
+stop_for_destination_ = stop_for_destination;
+}
+2、/home/alan/apollo/modules/planning/common/frame.cc
+if (segments_iter->StopForDestination()) {
+is_near_destination_ = true;
+3、/home/alan/apollo/modules/planning/tasks/traffic_decider/destination.cc
+if (!frame->is_near_destination()) {
+return Status::OK();
+}
+4、/home/alan/apollo/modules/planning/common/frame.h
+const bool is_near_destination() const { return is_near_destination_; }
+frame->is_near_destination()这个对终点的判断是来自于routing模块中读取的终点信息进行的判断，在navigation模式中没有routing模块，通过对frame->is_near_destination()相关信息进行处理能够判断车是否到终点？
+code中看在导航模式下没有路由信息，在每一次规划的路径段中都会输出STOP_REASON_DESTINATION这个信息，这个信息仅仅是在dreamview中进行显示，无法根据这个stop reason做出停车的动作，我的理解对吗？
+
+
+
+
+
+
+
+
+// why need traffic_light_unprotected_left(right)_turn_scenario #8559
+
+For example, a green light with a left arrow on it, it's a protected left turn, which means we have the right of way. As we are protected and theoretically don't need to consider anyone else.(Actually we will avoid if anyone is running the red light).
+But when we turn left on a junction with only solid green light without an arrow, we have to yield the right of way to an oncoming car if they are going straight. In this case, we are considered as unprotected left turn.
+
+
+@HongyiSun As you mentioned even if for protected left turns you have to consider vehicles running the red light, then I wonder what exactly the difference is for the planning algorithm if there is protection or not? What I mean is, you have to yield oncoming cars (even if they are running the red light) no matter there is protection or not.
+
+
+the reason we have different scenarios here is just because they have to run in different stages or be implemented in different way in some stage.
+we have protected_turn vs unprotected_turn because in unprotected_turn scenario(s), we'll have a stage of "creep".
+We have unprotected_right_turn vs unprotected_left_turn because we'll have different implementation to handle creep stage for right and left turn respectively. For right turn, we'll creep out of stop line of the intersection, for left turn, we'll need creep further.
+
+A scenario is basically a sequence of stages. That is how we decide if a scenario is needed to handle a driving situation.
+
+i known creep action, which is another part I'm not quit understand, will, let's discuss that later.
+however, here, my question is why split traffic light into two parts, if we do same aciton in trafficlight junction.
+as you said, wether protected or not, ego would cross stop line, yield dangers and moving slowly, why we put this issue together making it to a general case, through defining scenario?
+
+
+even for a human driver, the behavior in an unprotected and protected left turn is different. When you have a Protected turn, you scan the road for a possibility of an oncoming vehicle that has overshot the light but can still drive out normally as you "assume" that people generally follow the rule.
+But in an unprotected turn, you are yielding to oncoming traffic, which means you creep forward slowly until the lane is completely safe to cross, sometimes you will need to creep until the very last lane to then exit the junction, but in protected, once you have scanned the roads and are clear of doubt, you no longer creep but can drive the rest of the junction smoothly.
+Let me know if you have questions.
+
+
+
+
+// apollo 3.0 navigation mode question #5779
+
+Navigation mode supports multiple lanes and lane change in Apollo 3.0. You could use following command to send out multiple navigation lines:
+
+dev_docker:/apollo/modules/tools/navigator$python navigator.py navigation_line_1 navigation_line_2
+
+in this example, navigation_line_1 navigation_line_2 could be navigation line on two adjacent lanes. And navigation_line_1 has higher priority than 2.
+
+
+
+
+
+// 关于相对地图+lattice 多车道超车问题 #5897
+
+code版本： apollo 3.0
+系统版本： ubuntu 16.04
+问题描述：
+如issue 5779讨论：#5779
+apollo 3.0相对地图导航模式支持多车道超车，我们使用relative map+ lattice+navigation模式，
+在对code分析中，lattice_planner.cc是在横向-0.5~0.5，纵向10m、20m、40m、80m范围根据指引线进行路径规划，也就是lattice_planner.cc是在本车道(当前指引线)进行规划吗？
+lattice_planner.cc路径：
+/home/alan/apollo/modules/planning/planner/lattice/lattice_planner.cc
+如果前方有障碍物需要变换车道，这个时候需要临近车道的指引线给lattice_planner.cc吗？这个指引线是通过reference_line_provider.cc提供的吗？
+reference_line_provider.cc地址：
+/home/alan/apollo/modules/planning/reference_line/reference_line_provider.cc
+即如果前方有障碍物需要换车道时是通过变换lattice_planner.cc的指引线进行的吗？
+
+modules/planning/planner/lattice/lattice_planner.cc
+
+
+@quhezheng,感谢指点，我主要阅读了lattice相关的规划算法，在trace apollo 规划这部分代码中，下面是我的理解，你看看有没有问题：
+1、规划模块从相对地图模块接收到reference line，然后将这些reference line存放在reference line info这个类中，用python navigatior xxxx.smothed 脚本播放轨迹，播放几个轨迹，便有几个reference line，也便有几个reference line info。然后对每一个reference line info求取车的横向和纵向规划轨迹束，在求取纵向轨迹的过程中会考虑三种情况即超车、跟车、遇到障碍物及交通信号等停车，根据每一种情况分别进行轨迹生成，生成完横向纵向轨迹然后通过评价函数选取每一对横向纵向轨迹束进行打分，
+获取轨迹对评价值：
+double trajectory_pair_cost =
+trajectory_evaluator.top_trajectory_pair_cost();
+获取轨迹：
+auto trajectory_pair = trajectory_evaluator.next_top_trajectory_pair();
+在对每一个reference line info进行生成轨迹束的过程中最终只会有一个最优的轨迹数据存放到reference line info中。
+每一个规划周期选出最优的纵向、横向轨迹对，这些信息存放在ReferenceLineInfo 类指针中， 然后通过 FindDriveReferenceLineInfo选出代价最小的轨迹发布出去，
+选出代价最小轨迹：
+const auto* best_ref_info = frame_->FindDriveReferenceLineInfo();
+综上：即python navigatior xxxx.smothed播放几条参考线，生成几车道的相对地图，那么规划模块就会根据每一个参考线生成一最优条轨迹(此处的轨迹不是生成横向纵向轨迹束，而是对横向纵向轨迹束合成之后的轨迹)，然后从这几条参考线的最优轨迹中选取代价小的一条进行发布出去。
+2、在初始化frame类时即Frame::Init()会调用bool Frame::CreateReferenceLineInfo()，在bool ReferenceLineProvider::GetReferenceLines中从相对地图处获取reference line和segment，在获取完信息后存放在ReferenceLineInfo类指针中。同时在bool Frame::CreateReferenceLineInfo()中通过如下判断本车道优先还是临近车道优先，
+if (FLAGS_enable_change_lane_decider &&
+!change_lane_decider_.Apply(&reference_line_info_)) {
+AERROR << "Failed to apply change lane decider";
+return false;
+}
+但是有个问题是这儿有一个FLAGS_enable_change_lane_decider 宏，如果盖红设置为false，不进入该逻辑，那么车道优先级是车当前车道为最优优先级吗？
+
+
+
+
+// Longitudinal controller calibration and debugging #3271
+
+I am also wondering on which vehicle has this controller been tested?
+
+It seems that it is just doing a simple PID controller with some accounting for dead zone when breaking/applying throttle. I have never seen a vehicle that would have a linear response over 0-80mph range and would do speed control with only one PID controller.
+
+In addition how do you tune parameters for PID and make sure that your controller is reposnsive yet it does not overshoot?
+
+
+I am going to try and answer my own questions from the observations I have made these past few days.
+
+I did not know the expression deadzone but it most probably refers to the throttle and brake deadband.
+The station controller " track the station error between the vehicle trajectory reference and the vehicle position" (/docs/howto/how_to_tune_control_parameters.md).
+For a given speed and a desired acceleration, the calibration table return a throttle or brake command. As mentioned previously, it can be generated thanks to a set of python scripts located in /modules/tools/calibration.
+I am still looking for answers regarding my second question.
+
+@ubercool2 I believe this controller was tested on a Lincoln MKZ only. The PIDs are configured in /modules/control/conf/lincoln.pb.txt.
+
+
+Deadzone is deadband, essentially it describes the non-working zone for actuators.
+
+The statement about the station error is right.
+
+The similar controllers been tested on various vehicle platforms, including different sedans, minibus and more vehicle types. -- with different calibrations. The PID is used to handle the linear part while the calibration is used for non-linear part. @ubercool2 So you are right you will never see a vehicle a linear response over 0-80mph range and if you see closer to the code you will not see this assumption in Apollo controller design either.
+
+
+
+deadzone or deadband are just two control terminologies people always use it one or another. Sorry if I use deadzone instead of headband and this cause confusion to you.
+a. https://link.springer.com/article/10.1007/s11012-016-0563-3.
+b. https://pdfs.semanticscholar.org/e7ec/ae5fb3b0b96331a1bd4052b9e1db9649cce7.pdf
+c. https://pdfs.semanticscholar.org/7f1c/dbcf0b4be692f8bbb4d31329d9932f1f018a.pdf
+
+The application of the controller, specific about "sedans, minibus and more vehicle types" is beyond the scope of this open-sourced code and sorry that I can not elaborate more on that. But one fact is that this controller did work well on the non-Dataspeed DBW interface cars. 　
+
+Lacking of documentation is one significant problem in Control/Canbus/Tooling part. Another thing I should admit is that a lot of the open issues are not answered in time. We are aware of that and we will try our best to document more. Thanks and in the meanwhile we would appreciate if the community would help adding more comments or documents.
+
+
+How do I use this controller? In particular how do I obtain calibration values?
+
+You can run the controller by running the control script, ./script/control.sh. As I mentionned previously, the calibration table can be generated with a set of python scripts located in /modules/tools/calibration, it comes with documentation, /docs/howto/how_to_update_vehicle_calibration.md.
+
+@Capri2014, thank you for the confirmations. Could you go over my second question (describing the longitudinal controller debug messages) and I will close the issue.
+
+
+@bbidault2 Sorry this one previously did not have my name labeled so I had a hard time founding it back.
+
+In short the debug messages just help to capture how good the longitudinal tracking is for offline analysis. We have station-velocity-acceleration loop with first two as close loop and last as open loop.
+And for every loop, error = reference - feedback. Preview is off for 2.0 so you can ignore things about it as of now. Finally when we got acceleration, we use acceleration and current speed as the lookup table input and output is either throttle or brake.
+
+station_reference: 1.45842000403
+station_error: 1.23437740756
+station_error_limited: 1.23437740756
+preview_station_error: 1.40005740595
+speed_reference: 0.801999986172
+speed_error: 0.226802970228
+speed_controller_input_limited: 0.350240710985
+preview_speed_reference: 0.84399998188
+preview_speed_error: 0.268802965936
+preview_acceleration_reference: 0.436101042652
+acceleration_cmd_closeloop: 0.141147006527
+acceleration_cmd: 0.577248049179
+acceleration_lookup: 0.577248049179
+speed_lookup: 0.577000021935
+calibration_value: 18.061075906
+throttle_cmd: 18.061075906
+brake_cmd: 0.0
+is_full_stop: false
+slope_offset_compensation: -0.000468702950871
+
+
+@bbidault2 It is actually used to log and graph, if you turn on "PnC monitor" under dream view, you can see both the real time plot for planning/control ( under different tabs)
+
+
+
+
+// Reference for Trajectory Cost Calculation #8680
+
+Could you please provide a reference document how the cost is being calculated for trajectories in trajectory_cost.cc file. It would be great help in understanding the overall planning of the Ego vehicle.
+/modules/planning/tasks/optimizers/road_graph/trajectory_cost.cc
+
+
+
+// when ADC is sidepassing obstacle A, at stage_pass_obstacle, perception module gives a new obstacle at the front of obstacle A, can apollo 3.5 deal with this scence? #6991
+
+@guoweiwan In Apollo 3.5, the SidePass feature supports to side-pass static obstacle(s) if doable, and therefore we don't expect the targeted obstacle change or move. Once we identify the obstacle to side-pass, we plan a trajectory based on its location, size etc. And therefore if there's a NEW obstacle appears in front of it (I assume you meant to say very close), we won't "re-plan" for that. If our originally planned trajectory doesn't work well to side-pass this NEW obstacle at the same time, we may fail.
+We will provide better support in future release though.
+
+Hope this answered your question.
+Thanks for supporting Apollo!
+
+
+
+
+
+// Spline 1d solver: kernel cost function construction #8600
+I am trying to use the spline smoothing math package and I have a question about that. About using spline1d solver, is there any cost function for optimization besides the reference trajectory from AddReferenceLineKernelMatrix(x_coord, fx_guide, weight). I mean if we don't specify the reference line, does the solution of solver remain unique?
+
+I have checked a while in the kernel header file and .cc file and didn't figure out very confidently.
+
+Thanks so much, I am looking forward to your reply.
+
+OK, I see, actually minimum jerk or minimum acc could be added.
+
+
+
+
+
+
+
+
+// planning in navigation mode #7098
+Is the trajectory point generated by the planning module in the navigation mode a point in the enu coordinate system or the flu coordinate system ?
+
+@natashadsouza Thanks for your reply!But i still have a question about how to compute longitudinal Errors in the file /apollo/modules/control/controller/lon_controller.cc.
+
+auto matched_point = trajectory_analyzer->QueryMatchedPathPoint(
+VehicleStateProvider::instance()->x(),
+VehicleStateProvider::instance()->y());
+
+I think x,y represents the point in the enu coordinate system,in the navigation mode the trajectory point is in the flu coordinate system.And i do not see Coordinate transformation,so how are they calculated in the different coordinate system?
+
+@quuen the algorithms are all written in the FLU coordinate system. And the Coordinate transformation does happen within the code itself.
+
+
+
+
+
+// Prediction: In move_sequence_predictor, for computing longitudinal end state, why is the time returned for max_curvature point? #9547
+
+In move_sequence_predictor, while fitting the longitudinal polynomial, we predict an end state in the longitudinal direction. This computation is done using the curvature information, to predict the velocity for the end state. There are multiple cases in this particular function, most of them return the estimated time as being equal to the prediciton horizon. In one case it returns the time that will be taken to reach the point with maximum curvature. Can someone explain the reasoning behind this? Look at the code below to understand what I am referring to.
+
+std::pair<double, double> MoveSequencePredictor::ComputeLonEndState(
+    const std::array<double, 3>& init_s, const LaneSequence& lane_sequence) {
+  // Get the maximum kappa of the lane.
+  double max_kappa = 0.0;
+  double s_at_max_kappa = 0.0;
+  for (int i = 0; i < lane_sequence.path_point_size(); ++i) {
+    const PathPoint& path_point = lane_sequence.path_point(i);
+    if (path_point.s() < init_s[0] + FLAGS_double_precision) {
+      continue;
+    }
+    if (max_kappa < path_point.kappa()) {
+      max_kappa = path_point.kappa();
+      s_at_max_kappa = path_point.s();
+    }
+  }
+
+  // If the max. curvature is small (almost straight lane),
+  // then predict that the obstacle will keep current speed.
+  double v_init = init_s[1];
+  if (max_kappa < FLAGS_turning_curvature_lower_bound) {
+    return {v_init, FLAGS_prediction_trajectory_time_length};
+  }
+  // (Calculate the speed at the max. curvature point)
+  double v_end = apollo::prediction::predictor_util::AdjustSpeedByCurvature(
+      init_s[1], max_kappa);
+  // If the calculated speed at max. curvature point is higher
+  // than initial speed, don't accelerate, just predict that
+  // the obstacle will maintain current speed.
+  if (v_end + FLAGS_double_precision > v_init) {
+    return {v_init, FLAGS_prediction_trajectory_time_length};
+  }
+  // If the obstacle is already at the max. curvature point,
+  // then predict that it will maintain the current speed.
+  double s_offset = s_at_max_kappa - init_s[0];
+  double t = 2.0 * s_offset / (v_init + v_end);
+  if (t < FLAGS_double_precision) {
+    return {v_init, FLAGS_prediction_trajectory_time_length};
+  }
+  // If the deceleration is too much,
+  // then predict the obstacle follows a reasonable deceleration.
+  double acc = (v_end - v_init) / t;
+  if (acc < FLAGS_vehicle_min_linear_acc) {
+    t = v_init / (-FLAGS_vehicle_min_linear_acc);
+    return {FLAGS_still_obstacle_speed_threshold, t};
+  }
+  // Otherwise, predict that it takes t for the obstacle to arrive at the
+  // max. curvature point with v_end speed.
+  return {v_end, t};
+}
+Edit: I understand that the prediction is only done till the max_curvature point in the scenario I was looking at. But I am curious to understand why this is the case, as the trajectory predicted when the obsctacle is very close to this point is very short and is not reliable for planning.
+
+
+@sujithvemi Thanks for your asking. As to the current trajectory generation method, we need to find an end state for polynomial fit. Typically, vehicles decelerate while it is entering a turning. Thus, we select the most representative point -- the point with the maximal curvature as the end state and set the speed at the end state as a pre-defined comfortable speed.
+
+
+
+
+
+
+
+
+
+// Sending customized data to demo #9504
+
+Actually, I want to control the speed of car, add some obstacles to road, control the signals and the direction of car. Can I do any of these?
+
+https://github.com/ApolloAuto/apollo/blob/master/docs/specs/Dreamland_introduction.md
+
+
+
+
+
+// No conrtol-module output #9431
+Hi @udeto sorry I missed your reply earlier on, you need to send an auto command via https://github.com/ApolloAuto/apollo/blob/master/modules/control/proto/pad_msg.proto in order for control to be triggered for publishing control command, otherwise it would just be headers.
+
+
+
+
+// Apollo and real time #3707
+
+Dear all,
+I have been looking at Apollo for the last couple of days and I have really lots of questions. I will start posting them one by one in the issues. Let me know if you want them otherwise.
+
+In http://apollo.auto/ it is stated that Apollo is open, reliable and secure software. It is also stated that the by 2017-12 Apollo was gonna be ready for deployment in "Simple Urban Road Conditions". Now one of the most elementary things to have the system act reliably (which you want on public roads) is to have it act in real-time and deterministically. For the definition of the latter 2 please see this excellent talk: https://vimeo.com/236186712.
+
+1. I see that you apparently use kernel with RT PREEMPT but I see no where in the code call to set the scheduler (e.g. FIFO) or to set the real time priorities. Does it mean that you just run on the normal desktop ubuntu where your programs run and share resources with wifi, bluetooth and such drivers?
+2.I see logging to files or file manipulation being used everywhere: https://github.com/ApolloAuto/apollo/search?utf8=%E2%9C%93&q=fopen&type=. All of these calls are blocking and not safe at all
+3.I see new and delete operator being used everwhere: https://github.com/ApolloAuto/apollo/search?l=C%2B%2B&q=delete&type=. Also on the runtime which means that you fragment the memory all the time. Which in turns means that after hours of operation you will not be able to allocate even a simple string anymore.
+4.I see std::strings being used everywhere (they can not be made static).
+5.I see mutexes being used everywhere: https://github.com/ApolloAuto/apollo/search?utf8=%E2%9C%93&q=mutex&type=. They can not be pre-empted or controlled with priority and hence can not be used in real time code
+6.I see lots of variadic functions (e.g. printf, fprintf, ...). See why this is a dangerous flaw: https://stackoverflow.com/questions/3555583/passing-variable-number-of-arguments-with-different-type-c.
+7.I do not see any memory locking (mlockall) or heap trimming (mallopt) operation that would allow memory allocation on the start only and not yield any memory back to the OS.
+8. I do not see any memory supervision tools being used
+9.I do not see any tracing tools being used (e.g. LTT)
+
+
+
+
+// Apollo and software development process #3820
+Hi, I have couple of questions with respect to Apollo SW development process. Having well defined and followed SW development process is the key to safety and possible certification.
+
+1.Requirements. These can be high and low level and serve as an input to trace an intended feature development to its implementation and testing. I do not see them. For automotive standards such as ISO26262 this is a must.
+2.Use case(s) define in which context the SW is to be used. E.g. car performing a maneuver through a 4 way stop. I also didn’t find any use case.
+3.Code reviews. Are there any guidelines on how many people should review a particular pull request and what should they focus on? E.g. algorithm, style, …
+4.Testing. I see quite some tests written in Apollo. But do you have an idea how much of code is tested and untested? I see that you write unit and integration tests. It would be great if you would use a code coverage tool (e.g. gcov/lcov) and display unit test coverage and integration test coverage.
+5.Testing2. Do you run any SIL, HIL, torture or burn-in tests? Having coverage for those would also be great.
+6.Linting. I see some mentioning of linters but couldn’t quite figure it out which ones do you use. Do you use static code analysers such as e.g. klockworks?
+7.Design articles - I saw some how-tos but they do not seem to be explicitly linked to code. Design articles explains how a particular feature is to be used and what e.g. its limitations are.
+8.Builds. I see that you have travis server that builds PRs.
+9.There is much more checks to be applied if the code is to be automotive grade (e.g. MISRA compliance, MCDC code coverage, signed builds, etc..) but above is the bare minimum.
+
+There is much more checks to be applied if the code is to be automotive grade (e.g. MISRA compliance, MCDC code coverage, signed builds, etc..) but above is the bare minimum.
+
+
+Hi @ubercool2 , thank you for taking the time to explore Apollo and draft these questions for us. I would like to apologize that we did not get back to your questions sooner. These are all great questions and I will try to answer them individually:
+
+The autonomous driving industry is continually evolving and if you have followed Apollo throughout, you will know that we release newer versions continuously. Our new ReadMe has a high-level description of the system and sensor requirements with both the Hardware and Software installation guides exploring these requirements in detail. If you have more specific questions about what requirements you are looking for, please let us know.
+Could you provide a more specific explanation of what you are looking for? If you are talking about where you can test the driving scenarios, our simulation platform has hundreds of use-cases which you could explore once you have set-up the platform. Let me know if you need help to get that started. If you have suggestions on additional scenarios, please list them out so that we could review and hopefully include them as it will greatly benefit the developer community.
+Yes, we do have code reviews. During the PR, it clearly states that “At least 1 approving review is required to merge this pull request.” Also, we have designated engineers performing this review, therefore we have not released guidelines on it as the reviewers are well aware of our guidelines and standards. Should your review not be approved, the reviewer would definitely leave a comment that includes improvements.
+Great suggestion. We are currently in the process of exploring such code coverage tools. If you have a recommendation along with reasons for the recommendation, please share the same with us.
+Once again, this is something we are currently in the process of exploring. Your expertise will be much appreciated.
+We use Cpplint currently. No, we do not currently use Static code Analyzers.
+We have increased the number of how-tos to support our developer community. If you have additional specific suggestions on documentation, please include them. We will be happy to increase our documentation to help the community.
+You are correct.
+Hope above information answered some of your questions. Please feel free to leave comments below if you have any additional questions. Again, we apologize for taking so long to get back to you, and thank you for your support in the Apollo Project.
+
+
+
+
+// Question about making obstacles in Dreamview Simulation Mode #4822
+Hi guys, I get great help every time on this board. Thanks!
+
+I am trying to make some obstacles in Dreamview Simulation Mode and I have some questions about it.
+
+I opened issue (#4626) and @mickeyouyou gave me the answer thankfully, so now I can make one obstacle in Dreamview Simulation Mode.
+
+I have two more questions below about making obstacles.
+
+Q1. How can I make several obstacles ?
+I tried to make several obstacles. So I opened some terminal windows and executed the following commands.
+
+# Terminal 1 (in modules/tools/perception)
+python replay_perception.sh static_obstacle_1.json
+# Terminal 2 (in modules/tools/perception)
+python replay_perception.sh static_obstacle_2.json
+I set id_value and x,y_coordinate_values for the two json files differently.
+But it seems that they do not work properly.
+Can you tell me how to fix it?
+
+Q2. Is there any tools for creating path(trace value in json file) for the obstacle ?
+In example file garage_onroad_vehicle_3.json, there are trace values and obstacle in dreamview simulationworld moves along that path. I wonder about how Apolloteam made that trace values. (using rosbag file..?)
+
+Thanks!
+
+
+
+@hashim19 Hi, replay_perception.sh file has been removed from master branch as @xiaoxq mentioned above. You can find that file in r3.0.0 branch.
+I made two obstacles by following command line after running Dreamview.
+
+(in dev docker, /apollo/modules/tools/perception)
+python replay_perception.sh garage_onroad_static_4.json garage_onroad_vehicle_3.json
+You can run replay_perception.sh file with arguments(e.g. garage_onroad_static_4.json , garage_onroad_vehicle_3.json, ...) which you want to generate.
+Further, you can make your own json files.
+
+
+
+
+// Any example for making obstacles in Dreamview simulation environment? #4626
+I want to simulate some algorithms with Dreamview simulation environment (SimControl mode).
+
+I wonder about how can I make obstacles in Dreamview.
+
+I found out that there's previous similar question (#4338), but I'm not sure how to add new obstacles.
+
+From that question (#4338), @unacao said user have to follow 2 steps.
+
+Fill in the obstacle information according to the proto (perception_obstacle.proto).
+Publish the messages.
+I want to know there's any examples for following the steps.
+
+Also, it looks like there's some example files for filling the obstacle information.
+config.pb.txt or 1_perception_obstacles.pb.txt
+
+Can I use these files or is there any reference case for using it?
+
+
+hi @CCodie , in directory module/tools/perception, you can find some scripts like replay_perception.sh that can mock some obstacle and publish the message /apollo/perception/obstacles that descrbed in files garage_*.json, you can execute like :
+
+# in modules/tools/perception
+python replay_perception.sh garage_onroad_vehicle_3.json
+that will publish vehicle to topic /apollo/perception/obstacles in 10hz.
+
+or execute python replay_perception.sh garage_*.json, that will publish different obstable on or off road.
+
+
+
+
+// control message distance error_code: OK msg: "planning has no trajectory point." #9568
+
+Hi,
+I want to use apollo (3.0) with the carla simulator (0.9.5.).
+
+I have successfully connected apollo and carla, but when I pass the waypoints to apollo the car does not move.
+
+I am sending the waypoints on the ros topic /apollo/routing_request and get a "Routing success!" message on the monitor as a result.
+
+The planning module has the following error:
+
+E0831 10:11:57.656193  7432 trajectory_stitcher.cc:159] the distance between matched point and actual position is too large. Replan is triggered. lat_diff = 2.10425e-07, lon_diff = 5.0594
+E0831 10:12:01.297992  7432 trajectory_stitcher.cc:159] the distance between matched point and actual position is too large. Replan is triggered. lat_diff = 2.10425e-07, lon_diff = 5.1219
+
+
+
+However the planning module publishes the message on /apollo/planning:
+`trajectory_point {
+path_point {
+x: -3.24922968276
+y: 28.2791210075
+theta: 1.55190478421
+kappa: -0.000431162972088
+s: 24.4705144127
+dkappa: 0.000184319246155
+ddkappa: 0.0
+}
+v: 5.95111747937
+a: 1.66466648484
+relative_time: 6.70252118111
+}
+trajectory_point {
+path_point {
+x: -3.23777273409
+y: 28.8827493509
+theta: 1.55163883064
+kappa: -0.000307242230296
+s: 25.0742514772
+dkappa: 0.000203804291745
+ddkappa: 0.0
+}
+v: 6.12670687636
+a: 1.84965984662
+relative_time: 6.80252118111
+}
+trajectory_point {
+path_point {
+x: -3.22579030435
+y: 29.5048805608
+theta: 1.55147580696
+kappa: -0.000164938721502
+s: 25.696498069
+dkappa: 0.000220667105494
+ddkappa: 0.0
+}
+v: 6.32156659837
+a: 2.05016769888
+relative_time: 6.90252118111
+}
+trajectory_point {
+path_point {
+x: -3.2133788803
+y: 30.1475223905
+theta: 1.55141123627
+kappa: -1.11946580009e-05
+s: 26.33925974
+dkappa: 0.000235441429993
+ddkappa: 0.0
+}
+v: 6.53727650853
+a: 2.26675832291
+relative_time: 7.00252118111
+}
+trajectory_point {
+path_point {
+x: -3.20050131583
+y: 30.8128409064
+theta: 1.55143698202
+kappa: 0.000154116151633
+s: 27.0047028702
+dkappa: 0.000248336079839
+ddkappa: 0.0
+}
+v: 6.77547329806
+a: 2.5
+relative_time: 7.10252118111
+}
+decision {
+main_decision {
+cruise {
+change_lane_type: FORWARD
+}
+}
+object_decision {
+}
+vehicle_signal {
+turn_signal: TURN_NONE
+}
+}
+latency_stats {
+total_time_ms: 5.72896003723
+task_stats {
+name: "DpPolyPathOptimizer"
+time_ms: 1.55305862427
+}
+task_stats {
+name: "PathDecider"
+time_ms: 0.00238418579102
+}
+task_stats {
+name: "DpStSpeedOptimizer"
+time_ms: 0.0715255737305
+}
+task_stats {
+name: "SpeedDecider"
+time_ms: 0.00214576721191
+}
+task_stats {
+name: "QpSplineStSpeedOptimizer"
+time_ms: 0.707387924194
+}
+task_stats {
+name: "ReferenceLineProvider"
+time_ms: 1.27267837524
+}
+init_frame_time_ms: 0.00264549255371
+}
+routing_header {
+timestamp_sec: 1567237881.59
+module_name: "routing"
+sequence_num: 1
+}
+right_of_way_status: UNPROTECTED
+lane_id {
+id: "8_1_-1"
+}
+lane_id {
+id: "1_1_-1"
+}
+lane_id {
+id: "2_1_-1"
+}
+engage_advice {
+advice: KEEP_ENGAGED
+}
+trajectory_type: NORMAL
+
+(this is of course only the end of the message)
+
+To me it looks like the planning module is publishing a valid trajectory.
+
+The control module however publishes the following control command on /apollo/control:
+header { timestamp_sec: 1567240253.25 module_name: "control" sequence_num: 966 lidar_timestamp: 0 camera_timestamp: 0 radar_timestamp: 0 status { error_code: OK msg: "planning has no trajectory point." } } throttle: 0.0 brake: 50.0 speed: 0.0 gear_location: GEAR_DRIVE signal { turn_signal: TURN_NONE } latency_stats { total_time_ms: 0.40864944458 total_time_exceeded: false } engage_advice { advice: READY_TO_ENGAGE }
+
+
+The header time for planning modules is:
+
+timestamp_sec: 1567528938.23
+module name: std_planning
+sequence num: 3265
+I am passing a pre defined route as a list of waypoints to the routing module on the /apollo/routing_request topic:
+
+header {
+  timestamp_sec: 1567529914.0
+  module_name: "dreamview"
+  sequence_num: 1
+}
+waypoint {
+  pose {
+    x: -3.45605635643
+    y: 3.177764893
+  }
+}
+waypoint {
+  id: "2_1_-1"
+  pose {
+    x: -3.45609807968
+    y: 3.17774963379
+  }
+}
+waypoint {
+  id: "2_1_-1"
+  pose {
+    x: -3.45632362366
+    y: 4.17774963379
+  }
+}
+waypoint {
+  id: "2_1_-1"
+  pose {
+    x: -3.45654964447
+    y: 5.17774963379
+  }
+}
+waypoint {
+  id: "2_1_-1"
+  pose {
+    x: -3.45677518845
+    y: 6.17774963379
+  }
+}
+waypoint {
+  id: "2_1_-1"
+  pose {
+    x: -3.45700120926
+    y: 7.17774963379
+  }
+}
+waypoint {
+  id: "2_1_-1"
+  pose {
+    x: -3.45722675323
+    y: 8.17774963379
+  }
+}
+waypoint {
+  id: "2_1_-1"
+  pose {
+    x: -3.45745277405
+    y: 9.17774963379
+  }
+}
+waypoint {
+  id: "2_1_-1"
+  pose {
+    x: -3.45767831802
+    y: 10.1777496338
+  }
+}
+waypoint {
+  id: "2_1_-1"
+  pose {
+    x: -3.45790433884
+    y: 11.1777496338
+  }
+}
+waypoint {
+  id: "2_1_-1"
+  pose {
+    x: -3.45812988281
+    y: 12.1777496338
+  }
+}
+waypoint {
+  id: "2_1_-1"
+  pose {
+    x: -3.45835590363
+    y: 13.1777496338
+  }
+}
+waypoint {
+  id: "2_1_-1"
+  pose {
+    x: -3.4585814476
+    y: 14.1777496338
+  }
+}
+waypoint {
+  id: "2_1_-1"
+  pose {
+    x: -3.45880746841
+    y: 15.1777496338
+  }
+}
+waypoint {
+  id: "2_1_-1"
+  pose {
+    x: -3.45903301239
+    y: 16.1777496338
+  }
+}
+waypoint {
+  id: "2_1_-1"
+  pose {
+    x: -3.4592590332
+    y: 17.1777496338
+  }
+}
+waypoint {
+  id: "2_1_-1"
+  pose {
+    x: -3.45948457718
+    y: 18.1777496338
+  }
+}
+waypoint {
+  id: "2_1_-1"
+  pose {
+    x: -3.45971059799
+    y: 19.1777496338
+  }
+}
+waypoint {
+  id: "2_1_-1"
+  pose {
+    x: -3.45980858803
+    y: 20.1764068604
+  }
+}
+I thought that maybe there was something wring with the waypoints, but the routing module seems to work fine.
+
+
+@udeto Your routing is fine, the problem is the header time diff between planning (1567528938.23) and control ( 1567240253.25), they have 288684.98 sec difference...
+
+
+I figured it out, the problem was that the control module threw an "estop" error when the trajectory was not yet planned. So when the planning module published the trajectory the control module was still stuck at "estop" and therefore sending the "estop" brake command constantly. I needed to send a reset command via the control pad to get the control module to re-evaluate its status. After that the control module follows the planned trajectory.
+
+Only one problem remains, the car is moving very slow, never exceeding 6 kmph. Is there a possibility to set a higher target velocity?
+
+then you need to dive into the details of planning/control/mapdata, the reasons can be in all three modules, I would recommend start by checking the map speed limits.
+
+
+
+
+
+// Regarding path decider, what's the difference between "side pass" decision and "overtake" decision? #6837
+
+"SidePass" is a "lateral" object decision, similar to "Nudge". These decisions help ego vehicle to dudge obstacle(s) in lateral direction while passing them.
+"SidePass" may cross lane boundaries little bit, and "Nudge" would be within the current lane.
+
+"Overtake"/"Yield"/"Stop" are "longitudinal" object decisions when ego vehicle and other obstacles path may cross.
+OVERTAKE: ego vehicle shall arrive certain point BEFORE another vehicle/moving obstacle.
+YIELD: ego vehicle shall arrive certain point AFTER another vehicle/moving obstacle.
+STOP: ego vehicle shall STOP behind another vehicle/obstacle.
+
+
+
+"avoid" decision is a special decision we design/plan for ESTOP.
+When ADC is unable to self-driving properly, it'll enter estop scenario. It may hard-brake, or cruise via a safe route if possible. During this period, it still need to dudge/avoid obstacles, but the algrithmn/handling can be very different from Nudge decision in normal situation. That's the decision of AVOID.
+
+The "avoid" decision is "lateral" object decision in safe route cruise scenario. Am I right?
+
+@KevinYuk yes. you are right. the "avoid" decision is a "lateral" object decision in e-stop mode. (we do not have a "safe route cruise" scenario though.)
+
+
+
+
+// Planning/Control issue: right turn is not working right #5879
+
+Through the turning, seems that the front wheel is following the planned trajectory. Why is the center of the vehicle not following the trajectory? I am not sure the problem is from planning or control or the parameter of the car?
+
+I faced the same issued when playing with the simulator. I think it may come from several sources.
+
+Mapping from the simulator to Apollo map has an offset.
+Perception did not detect the pole.
+Delay between Apollo and simulator which may cause the controller delay -> sim car could not follow trajectory.
+These are what I could think the problem come from. Need further investigation to verify.
+
+
+I agree that the delay might be the reason since we observed that the car  longitudinal motion has a delay and you are right the pole may not be detected by Apollo. I am not very clear about mapping, so I need to read more about HDmap.
+
+Please try Apollo 3.5. I remember one of the fix is related to this issue. Thanks.
+
+
+
+
+// Who triggers the change of the reference line? #3843
+
+Hello,
+
+What event makes the switch of the reference line?
+It is perhaps related to main_decision but not quite follow.
+Thank you!
+
+
+Reference line was mainly derived from routing and map.
+Not sure what you mean by 'switch reference line'. It updates itself when it expands on the road or change lane.
+Most of the logic is in https://github.com/ApolloAuto/apollo/blob/master/modules/map/pnc_map/pnc_map.cc and https://github.com/ApolloAuto/apollo/blob/master/modules/planning/reference_line/reference_line_provider.cc
+
+
+Thank you @startcode,
+
+By just looking at demo_2_0 play, I see the reference line is switched to the target lane. So, I was wondering lane change event triggers the switching reference line or some other event (rules?) triggers switching the reference line and hence lane change happens.
+
+Can you elaborate little more on lane change algorithm? What triggers lane change?
+For example, perception sees obstacle->traffic_rule->lane change decision made-> reference line is changed-> planning to change lane.
+
+I see lane change related potions in several places, main_decision, change_lane_decision, pnc_map and so on.
+
+Thank you for the great help!
+
+
+Lane change is a planning option given by routing.
+When there is a change lane region in routing, we will create two reference lines, one on current lane, and another on the target lane. The planning algorithm will try to make one planning trajectory on each reference line, and it will eventually select one based on traffic rules and cost functions.
+
+
+lane change triggered by route from pnc map (This is true), or presence of obstacle on the lane (this feature not supported yet). Obstacle does not trigger change lane now, but it will affect change lane decision.
+
+"reference line is changed" is not accurate. I would say "reference line is selected". Reference line is a static information derived from route and map. Multiple reference lines in a frame indicate that change lane is an option in the current frame. Planning selects reference line based on traffic condition and obstacles, and a lot of other logic.
+
+
+
+// apollo/docs/demo_guide/
+
+
+
+
+
+// dp_st_graph #3562
+
+I find a little problem in dp_st_graph.cc:
+in line 218:
+
+const double delta_s_upper_bound = v0 * unit_t_ + vehicle_param_.max_acceleration() * speed_coeff;//vt + at^2
+
+Is that should be vt+at22?
+/modules/planning/tasks/dp_st_speed/dp_st_graph.cc
+
+In our finite element method, we are using the assumption that the speed between each time points is constant, and speed can make an abrupt change between segments. So the estimated delta_s_upper_bound is represented as the function as in line 218. It should not be divided by 2.
+
+You can make other assumptions on the speed and accelerations on a discretized S-T graph. If you assume that the acceleration between time points is constant, then you can calculate the upper bound using with the 1/2 coefficient.
+
+
+
+// Switching lanes in custom created map #4008
+Hi! I have created a map according to the modified opendrive standards of Apollo and want to run it in dreamview. Everything works except the car can't route between lanes, eg. all I want it to do is to change from lane -1 to lane -2. I've tried adding them as neighbours and in different constellations of laneOverlapGroups but nothing has worked thus far. The road is a 100m long straight. Any tips?
+
+Cheers!
+
+
+Please check the results of routing and verify "ChangeLaneType" is marked correctly. The current routing module requires a long enough range to change lane. Please also verify that the lane -1 and lane -2 have overlap long enough (several tens of meters).
+
+
+
+
+
+// planning模块发布数据的设置 #1504
+
+您好，
+现在在看planning模块，大体执行流程可以看得明白，大体如下：
+超时时执行Planning::OnTimer---> Planning::RunOnce在这里定义了trajectory_pb--->Planning::Plan()--->EMPlanner::Plan()--->optimizer->Execute()在这里调用各个task。
+
+看到trajectory_pb在Planning::RunOnce()中定义之后，然后在Planning::Plan函数中设置其中的debug，latency_stats和decision项，然后调用planner_->Plan(stitching_trajectory.back(), frame_.get(),
+&reference_line_info);
+在此函数中trajectory_pb并没有作为参数，其主要的数据成员trajectory_point和path_point是在哪里设置的？
+还有stitching_trajectory的作用是什么？感觉planning模块难度比较大，有没有比较详细些的资料介绍？谢谢。
+
+
+
+正如你所见，planner_->Plan() 接收了reference_line_info，而且其实它也来自 frame_ 的成员。完成一轮计算后会调用 Frame::FindDriveReferenceLineInf() 找到一条cost最小的reference line, 调用PopulateTrajectoryProtobuf(trajectory_pb)填入进去。
+
+stitching_trajectory是为了缝合上一帧trajectory 与当前帧，使过渡平滑。参考TrajectoryStitcher::ComputeStitchingTrajectory
+You can refer docs/specs/qp_spline_path_optimizer.md, docs/specs/qp_spline_st_speed_optimizer.md, and docs/specs/reference_line_smoother.md for the major algorithms in planning module. We will try our best to complete a full document for planning in a near future.
+
+
+Router will return a response containing road segments searched by A*star, an a planner will digest it to generate fine tuned trajectory data. @ahuer2435 was asking where "trajectory_pb" comes from. I guest it populated by the planner algorithm for publish. Am I right?
+
+The "trajectory_pb" comes from the plan function in planning.cc.
+
+Status Planning::Plan(const double current_time_stamp,
+const std::vector& stitching_trajectory,
+ADCTrajectory* trajectory_pb);
+
+
+
+
+
+
+// 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

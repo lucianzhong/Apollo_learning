@@ -25,8 +25,7 @@
 5. build apollo in ubuntu14 docker
 	./apollo.sh  or  build_no_peception dbg (by default)    or   ./apollo.sh build_opt_gpu  // modify the WORKSPACE.in  https://gitee.com/audier0879/ad-rss-lib    //root@apollo5-apollo-ubuntu14-1:/apollo# ./apollo.sh build_no_peception dbg 
 
-	root@apollo5-apollo-ubuntu14-1:/apollo/bazel-bin/CyberBridge
-	CybertronBridgeApollo
+
 
 
 	
@@ -36,6 +35,9 @@
 		sudo ./rebuild_debug.sh
 	root@apollo5-cybertron2-ubuntu16-1:/Cybertron2/Modules/BridgeApollo/CybertronBridgeApolloCyber#   // need the built  ../../../../apollo/bazel-bin/CyberBridge/libApolloCyber.so
 		sudo ./rebuild_debug.sh
+
+
+
 
 
 7. data log location
@@ -89,6 +91,13 @@ lrwxrwxrwx  1 root root       62 Aug  7 08:59 CybertronBridgeApollo -> /Cybertro
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+// use preStart.py to generate sim_map and routing_map
+
+python preStart.py  --url=  --md5=  --loop=0  --scene_name=aachen
+
+
 
 // How to debug the Bridage data:
 
