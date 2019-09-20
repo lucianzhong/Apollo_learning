@@ -12,7 +12,7 @@
 	cuda版本，nvidia驱动版本，卡的型号
 
 	In this tutorial, it comes sucessfully with:
-    cuda-8.0,NVIDIA-384,rtx1070
+    cuda-8.0,NVIDIA-384.130,rtx1070
 
 
 
