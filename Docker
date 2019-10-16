@@ -123,4 +123,5 @@ root@b8573233d675:/#
 	
 	
 	
-	
+16.  docker run -t -i 36dc0d1c2551 /bin/bash     
+      // run images

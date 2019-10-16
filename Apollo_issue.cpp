@@ -4236,7 +4236,662 @@ That is OK. You may need to modify the code that parses the data in the modules 
 
 
 
+// Piecewise jerk path optimizer failed when a vehicle is moving through a sharp turn #9684
+
+Hi, ApolloAuto community!
+Can you help me and tell how can I fix this problem?
+
+E0915 piecewise_jerk_path_optimizer.cc:205] piecewise jerk path optimizer failed
+E0915 piecewise_jerk_problem.cc:104] failed optimization status:  primal infeasible
+E0915 path_optimizer.cc:41] Reference Line 1_0 is not drivable after PIECEWISE_JERK_PATH_OPTIMIZER
+
+It happened when vehicle try to execute turn like at the picture. And after the last error it does not move.
+
+System information
+Linux Ubuntu 16.04:
+Apollo installed from source:
+Apollo version 5.0:
+
+The primal infeasible means the optimizer proved that it is impossible to find a solution for that problem. Could you please make sure,
+
+If it is feasible for your vehicle to make that turn (or say if the turning is too sharp to follow)?
+Or did you ever tried to change the vehicle params under modules/common/data/vehicle_param.pb.txt if you are using your own vehicle with more flexible control?
+
+@HongyiSun, thanks for your reply, it is very helpful.
+
+I used "Sim control" mode with the MKZ vehicle model and it seems this turn is not feasible.
+When parameters was changed under modules/calibration/data/vehicle_param.pb.txt, ADC passed this turn.
+
+
+
+
+
+
+
+
+
+
+
+// Is there sensor data in demo_3.5.record? #8531
+
+When I use cyber_record command to replay demo_3.5.record, cyber_monitor shows no sensor data created. The FrameRatio of /apollo/sensor/camera/front_6mm, /apollo/sensor/lidar16/compensator/PointCloud2 and some other channels are 0.
+
+So when I launched perception module separately, no obstacle data were published because of the missing input sensor data. Where can I find the sensor data?
+
+System information
+OS Platform and Distribution: Ubuntu16.04
+Apollo installed from (source or binary): source
+Apollo version: 3.5
+Steps to reproduce the issue:
+build apollo and launch dreamview
+cyber_record play -f demo_3.5.record -l
+cyber_monitor
+
+
+@yfzm you are correct, the demo record does not contain any sensor data.
+
+
+
+
+
+@natashadsouza Thank you for your reply.
+
+I found sensor data at data open platform. Is there any tutorials about how to use it in apollo 3.5?  ///http://data.apollo.auto/?locale=en-us&lang=en
+
+
+PS: I have tried to use some data set of the platform:
+
+Vehicle System Demo Data: it still does not contains any camera data.
+Calibrate Demo Data: when I use rosbag_to_record to convert the format, it reports Error: the input file is not a ros bag file.
+
+
+You can try conversion tool "rosbag_to_record" from document below.
+https://github.com/ApolloAuto/apollo/blob/master/docs/cyber/CyberRT_Developer_Tools.md
+
+
+
+
+
+
 // 
+
+/modules/planning/on_lane_planning.cc
+
+When I study on_lane_planning.cc, I found a minor code scequence issue. In RunOnce() at about line 230 (shown below)
+
+  if (util::IsDifferentRouting(last_routing_, *local_view_.routing)) {
+      last_routing_ = *local_view_.routing;
+      PlanningContext::Instance()->mutable_planning_status()->Clear();
+      reference_line_provider_->UpdateRoutingResponse(*local_view_.routing);
+  }
+
+  // Update reference line provider and reset pull over if necessary
+  reference_line_provider_->UpdateVehicleState(vehicle_state);
+the scequence is:
+
+reference_line_provider_->UpdateRoutingResponse(*local_view_.routing);
+reference_line_provider_->UpdateVehicleState(vehicle_state);
+
+
+modules/planning/reference_line/reference_line_provider.cc
+in the function of reference_line_provider_->UpdateRoutingResponse(*local_view_.routing); we can see
+
+bool ReferenceLineProvider::UpdateRoutingResponse(const routing::RoutingResponse &routing) {
+  std::lock_guard<std::mutex> routing_lock(routing_mutex_);
+  routing_ = routing;
+  has_routing_ = true;
+  return true;
+}
+
+
+/modules/planning/on_lane_planning.cc
+And there is another thread called "GenerateThread" inside reference_line_provider, which use has_routing_ to adjudge to do things
+
+void ReferenceLineProvider::GenerateThread() {
+  while (!is_stop_) {
+    constexpr int32_t kSleepTime = 50;  // milliseconds
+    cyber::SleepFor(std::chrono::milliseconds(kSleepTime));
+    const double start_time = Clock::NowInSeconds();
+    if (!has_routing_) {
+      AERROR << "Routing is not ready.";
+      continue;
+    }
+    std::list<ReferenceLine> reference_lines;
+    std::list<hdmap::RouteSegments> segments;
+    if (!CreateReferenceLine(&reference_lines, &segments)) {
+      AERROR << "Fail to get reference line";
+      continue;
+    }
+    UpdateReferenceLine(reference_lines, segments);
+    const double end_time = Clock::NowInSeconds();
+    std::lock_guard<std::mutex> lock(reference_lines_mutex_);
+    last_calculation_time_ = end_time - start_time;
+  }
+}
+
+
+we can see, if has_routing_ is true, it will call CreateReferenceLine() function, which shown below
+
+
+modules/planning/reference_line/reference_line_provider.cc
+
+bool ReferenceLineProvider::CreateReferenceLine(
+    std::list<ReferenceLine> *reference_lines,
+    std::list<hdmap::RouteSegments> *segments) {
+  CHECK_NOTNULL(reference_lines);
+  CHECK_NOTNULL(segments);
+
+  common::VehicleState vehicle_state;
+  {
+    std::lock_guard<std::mutex> lock(vehicle_state_mutex_);
+    vehicle_state = vehicle_state_;
+  }
+
+  routing::RoutingResponse routing;
+  {
+    std::lock_guard<std::mutex> lock(routing_mutex_);
+    routing = routing_;
+  }
+  bool is_new_routing = false;
+  {
+    // Update routing in pnc_map
+    std::lock_guard<std::mutex> lock(pnc_map_mutex_);
+    if (pnc_map_->IsNewRouting(routing)) {
+      is_new_routing = true;
+      if (!pnc_map_->UpdateRoutingResponse(routing)) {
+        AERROR << "Failed to update routing in pnc map";
+        return false;
+      }
+    }
+  }
+
+  if (!CreateRouteSegments(vehicle_state, segments)) {  // use vehicle_state, and call CreateRouteSegments(vehicle_state, segments)  // So if reference_line_provider_->UpdateRoutingResponse(*local_view_.routing) is called, the CreateRouteSegments(vehicle_state, segments) function in GenerateThread will be called
+    AERROR << "Failed to create reference line from routing";
+    return false;
+  }
+  if (is_new_routing || !FLAGS_enable_reference_line_stitching) {
+    for (auto iter = segments->begin(); iter != segments->end();) {
+      reference_lines->emplace_back();
+      if (!SmoothRouteSegment(*iter, &reference_lines->back())) {
+        AERROR << "Failed to create reference line from route segments";
+        reference_lines->pop_back();
+        iter = segments->erase(iter);
+      } else {
+        Vec2d vec2d(vehicle_state.x(), vehicle_state.y());
+        common::SLPoint sl;
+        if (!reference_lines->back().XYToSL(vec2d, &sl)) {
+          AWARN << "Failed to project point: " << vec2d.DebugString()
+                << " to stitched reference line";
+        }
+        Shrink(sl, &reference_lines->back(), &(*iter));
+        ++iter;
+      }
+    }
+    return true;
+  } else {  // stitching reference line
+    for (auto iter = segments->begin(); iter != segments->end();) {
+      reference_lines->emplace_back();
+      if (!ExtendReferenceLine(vehicle_state, &(*iter),
+                               &reference_lines->back())) {
+        AERROR << "Failed to extend reference line";
+        reference_lines->pop_back();
+        iter = segments->erase(iter);
+      } else {
+        ++iter;
+      }
+    }
+  }
+  return true;
+}
+
+
+
+we can see it begins to use vehicle_state, and call CreateRouteSegments(vehicle_state, segments).
+So if reference_line_provider_->UpdateRoutingResponse(*local_view_.routing) is called, the CreateRouteSegments(vehicle_state, segments) function in GenerateThread will be called
+
+Is it possible of the following code scequence be happened?
+
+reference_line_provider_->UpdateRoutingResponse(*local_view_.routing) is called
+CreateRouteSegments(vehicle_state, segments) is called in GenerateThread
+reference_line_provider_->UpdateVehicleState(vehicle_state);
+If it happened, the vehicle_state in 2nd step maybe old or wrong data, because the newest vehicle_state data is updated at 3rd step
+
+So I think the right code scequence in on_lane_planning.cc is below
+
+  // Update reference line provider and reset pull over if necessary
+  reference_line_provider_->UpdateVehicleState(vehicle_state);
+
+  if (util::IsDifferentRouting(last_routing_, *local_view_.routing)) {
+      last_routing_ = *local_view_.routing;
+      PlanningContext::Instance()->mutable_planning_status()->Clear();
+      reference_line_provider_->UpdateRoutingResponse(*local_view_.routing);
+  }
+just for your reference, thank you :-)
+
+
+
+
+
+@s894330 all the attributes of vehicle_state is independent of routing or planning or  reference line.
+https://github.com/ApolloAuto/apollo/blob/master/modules/common/vehicle_state/proto/vehicle_state.proto
+reference line is generated based on routing. we just want to make sure vehicle_state gets updated when we generate reference line. The sequence (update vehicle_state before or after new routing received) does not really matters here.
+
+
+
+
+// non-consistent static obstacle projection on hdmap::path across two consective frames causes planning node crash #5878
+
+ apollo/modules/planning/reference_line/reference_line.cc 
+ modules/map/pnc_map/path.cc
+
+ReferenceLine::GetSLBoundary() --> ReferenceLine::XYToSL() -> map_path_.GetProjection()
+
+
+To reproduce the issue is a bit tricky. But once it is reproduced, it can be consistently reproduced.
+In our setup, there is only one DESTINATION static obstacle. It is represented as a 2d box internally. The 4 corners of the box is projected onto the reference line in each frame to verify whether it is within the range. Here is the calling sequences:
+ReferenceLine::GetSLBoundary() --> ReferenceLine::XYToSL() -> map_path_.GetProjection()
+
+
+
+The frame in which projections are still fine:
+
+W1016 13:02:57.962399    15 reference_line.cc:478] corner: 440752.7832 , 5018675.203
+W1016 13:02:57.963398    15 path.cc:615] path::getProjection s: -35.353 l:171.136 min_index: 0 num_segments: 629 total length: 179.883
+W1016 13:02:57.963398    15 reference_line.cc:478] corner: 440748.4133 , 5018672.773
+W1016 13:02:57.963398    15 path.cc:615] path::getProjection s: -31.8085 l:167.61 min_index: 0 num_segments: 629 total length: 179.883
+W1016 13:02:57.963398    15 reference_line.cc:478] corner: 440748.4619 , 5018672.686
+W1016 13:02:57.964398    15 path.cc:615] path::getProjection s: -31.7379 l:167.681 min_index: 0 num_segments: 629 total length: 179.883
+W1016 13:02:57.964398    15 reference_line.cc:478] corner: 440752.8318 , 5018675.116
+W1016 13:02:57.965399    15 path.cc:615] path::getProjection s: -35.2825 l:171.207 min_index: 0 num_segments: 629 total length: 179.883
+
+The 's' projection for 4 corners are (-35.353 , -31.8085, -31.7379, -35.2825).
+....
+
+The last frame in which projections are unexpected:
+
+W1016 13:02:58.063395    15 reference_line.cc:478] corner: 440752.7832 , 5018675.203
+W1016 13:02:58.063395    15 path.cc:615] path::getProjection s: -35.6943 l:171.135 min_index: 0 num_segments: 629 total length: 179.662
+W1016 13:02:58.063395    15 reference_line.cc:478] corner: 440748.4133 , 5018672.773
+W1016 13:02:58.064394    15 path.cc:615] path::getProjection s: -32.1497 l:167.609 min_index: 0 num_segments: 629 total length: 179.662
+W1016 13:02:58.064394    15 reference_line.cc:478] corner: 440748.4619 , 5018672.686
+W1016 13:02:58.065394    15 path.cc:615] path::getProjection s: 173.734 l:170.708 min_index: 574 num_segments: 629 total length: 179.662
+W1016 13:02:58.065394    15 reference_line.cc:478] corner: 440752.8318 , 5018675.116
+W1016 13:02:58.065394    15 path.cc:615] path::getProjection s: -35.6238 l:171.206 min_index: 0 num_segments: 629 total length: 179.662
+
+The 's' projection for 4 corners are (-35.6943 , -32.1497, 173.734,  -35.6238).
+Specially, the 's' projection of the third corner ( 440748.4619 , 5018672.686) is now 173.734 which has a big diff from other three corner. In turn, it causes the following crash at FrenetFramePath::EvaluateByS().
+...
+W1016 13:02:58.073395    15 path_decider.cc:126] obstacle start s: -35.6943 Id: DEST
+W1016 13:02:58.073395    15 frenet_frame_path.cc:64] s: -35.6943 back_s: 67.7514 front_s: 29.7514
+F1016 13:02:58.073395    15 frenet_frame_path.cc:67] Check failed: s < points_.back().s() + 1.0e-6 && s > points_.front().s() - 1.0e-6
+
+
+
+
+The l value are very large (~170). Are you trying to project obstacles near to the reference line?
+
+
+@lianglia-apollo Thanks for the quick reply. I did not modify any logic of the code. You are right. The 'l' value are very large which mean the DEST obstacle is far away from the reference line.
+
+
+
+
+modules/planning/common/reference_line_info.cc
+
+PathObstacle* ReferenceLineInfo::AddObstacle(const Obstacle* obstacle) {
+  if (!obstacle) {
+    AERROR << "The provided obstacle is empty";
+    return nullptr;
+  }
+  auto* path_obstacle = path_decision_.AddPathObstacle(PathObstacle(obstacle));
+  if (!path_obstacle) {
+    AERROR << "failed to add obstacle " << obstacle->Id();
+    return nullptr;
+  }
+
+  SLBoundary perception_sl;
+  if (!reference_line_.GetSLBoundary(obstacle->PerceptionBoundingBox(), &perception_sl)) {  // The obstacle's SL boundary is computed by calling ReferenceLine::GetSLBoundary(). The 'l' value is not checked for lateralDecision at this stage. 
+    AERROR << "Failed to get sl boundary for obstacle: " << obstacle->Id();
+    return path_obstacle;
+  }
+  path_obstacle->SetPerceptionSlBoundary(perception_sl);
+
+  if (IsUnrelaventObstacle(path_obstacle)) {
+    ObjectDecisionType ignore;
+    ignore.mutable_ignore();
+    path_decision_.AddLateralDecision("reference_line_filter", obstacle->Id(),
+                                      ignore);
+    path_decision_.AddLongitudinalDecision("reference_line_filter",
+                                           obstacle->Id(), ignore);
+    ADEBUG << "NO build reference line st boundary. id:" << obstacle->Id();
+  } else {
+    ADEBUG << "build reference line st boundary. id:" << obstacle->Id();
+    path_obstacle->BuildReferenceLineStBoundary(reference_line_,
+                                                adc_sl_boundary_.start_s());
+
+    ADEBUG << "reference line st boundary: "
+           << path_obstacle->reference_line_st_boundary().min_t() << ", "
+           << path_obstacle->reference_line_st_boundary().max_t()
+           << ", s_max: " << path_obstacle->reference_line_st_boundary().max_s()
+           << ", s_min: "
+           << path_obstacle->reference_line_st_boundary().min_s();
+  }
+  return path_obstacle;
+}
+
+
+
+
+The obstacle has SL boundary is computed by calling ReferenceLine::GetSLBoundary(). The 'l' value is not checked for lateralDecision at this stage. Then later on, in the following function:
+
+
+
+modules/planning/tasks/path_decider/path_decider.cc
+
+bool PathDecider::MakeStaticObstacleDecision(
+    const PathData &path_data, PathDecision *const path_decision) {
+  DCHECK_NOTNULL(path_decision);
+  const auto &frenet_path = path_data.frenet_frame_path();
+  const auto &frenet_points = frenet_path.points();
+  if (frenet_points.empty()) {
+    AERROR << "Path is empty.";
+    return false;
+  }
+
+  const double half_width =
+      common::VehicleConfigHelper::GetConfig().vehicle_param().width() / 2.0;
+
+  const double lateral_radius = half_width + FLAGS_lateral_ignore_buffer;
+
+  const double lateral_stop_radius =
+      half_width + FLAGS_static_decision_nudge_l_buffer;
+
+  for (const auto *path_obstacle : path_decision->path_obstacles().Items()) {
+    const auto &obstacle = *path_obstacle->obstacle();
+    bool is_bycycle_or_pedestrain =
+        (obstacle.Perception().type() ==
+             perception::PerceptionObstacle::BICYCLE ||
+         obstacle.Perception().type() ==
+             perception::PerceptionObstacle::PEDESTRIAN);
+
+    if (!is_bycycle_or_pedestrain && !obstacle.IsStatic()) {
+      continue;
+    }
+
+    if (path_obstacle->HasLongitudinalDecision() &&
+        path_obstacle->LongitudinalDecision().has_ignore() &&
+        path_obstacle->HasLateralDecision() &&
+        path_obstacle->LateralDecision().has_ignore()) {
+      continue;
+    }
+    if (path_obstacle->HasLongitudinalDecision() &&
+        path_obstacle->LongitudinalDecision().has_stop()) {
+      // STOP decision
+      continue;
+    }
+    if (path_obstacle->HasLateralDecision() &&
+        path_obstacle->LateralDecision().has_sidepass()) {
+      // SIDE_PASS decision
+      continue;
+    }
+
+    if (path_obstacle->reference_line_st_boundary().boundary_type() ==
+        StBoundary::BoundaryType::KEEP_CLEAR) {
+      continue;
+    }
+
+    // IGNORE by default
+    ObjectDecisionType object_decision;
+    object_decision.mutable_ignore();
+
+    const auto &sl_boundary = path_obstacle->PerceptionSLBoundary();
+
+//************************No lateral distance check yet*********************************************
+    if (sl_boundary.end_s() < frenet_points.front().s() ||
+        sl_boundary.start_s() > frenet_points.back().s()) {
+      path_decision->AddLongitudinalDecision("PathDecider/not-in-s",
+                                             obstacle.Id(), object_decision);
+      path_decision->AddLateralDecision("PathDecider/not-in-s", obstacle.Id(),
+                                        object_decision);
+      continue;
+    }
+
+
+
+//****************************Failed in the following call***************************
+    const auto frenet_point = frenet_path.GetNearestPoint(sl_boundary);
+    const double curr_l = frenet_point.l();
+    if (curr_l - lateral_radius > sl_boundary.end_l() ||
+        curr_l + lateral_radius < sl_boundary.start_l()) {
+      // ignore
+      path_decision->AddLateralDecision("PathDecider/not-in-l", obstacle.Id(),
+                                        object_decision);
+    } else if (curr_l - lateral_stop_radius < sl_boundary.end_l() &&
+               curr_l + lateral_stop_radius > sl_boundary.start_l()) {
+      // stop
+      *object_decision.mutable_stop() =
+          GenerateObjectStopDecision(*path_obstacle);
+
+      if (path_decision->MergeWithMainStop(
+              object_decision.stop(), obstacle.Id(),
+              reference_line_info_->reference_line(),
+              reference_line_info_->AdcSlBoundary())) {
+        path_decision->AddLongitudinalDecision("PathDecider/nearest-stop",
+                                               obstacle.Id(), object_decision);
+      } else {
+        ObjectDecisionType object_decision;
+        object_decision.mutable_ignore();
+        path_decision->AddLongitudinalDecision("PathDecider/not-nearest-stop",
+                                               obstacle.Id(), object_decision);
+      }
+    } else if (FLAGS_enable_nudge_decision) {
+      // nudge
+      if (curr_l - lateral_stop_radius > sl_boundary.end_l()) {
+        // LEFT_NUDGE
+        ObjectNudge *object_nudge_ptr = object_decision.mutable_nudge();
+        object_nudge_ptr->set_type(ObjectNudge::LEFT_NUDGE);
+        object_nudge_ptr->set_distance_l(FLAGS_nudge_distance_obstacle);
+        path_decision->AddLateralDecision("PathDecider/left-nudge",
+                                          obstacle.Id(), object_decision);
+      } else {
+        // RIGHT_NUDGE
+        ObjectNudge *object_nudge_ptr = object_decision.mutable_nudge();
+        object_nudge_ptr->set_type(ObjectNudge::RIGHT_NUDGE);
+        object_nudge_ptr->set_distance_l(-FLAGS_nudge_distance_obstacle);
+        path_decision->AddLateralDecision("PathDecider/right-nudge",
+                                          obstacle.Id(), object_decision);
+      }
+    }
+  }
+
+  return true;
+}
+
+
+
+We also noticed this issue. We are fixing it by cutting the reference line if the curvature is too large. The new code will be released soon. We made some modifications on pnc_map to cut a segment of routing lane segment if we found the curvature is greater than some threshold.
+
+I am thinking that maybe we do not need to check for DEST obstacle when it is very far away, which will cause some mapping issues. We are able to find the destination from routing, and extract the distance from ego vehicle to the destination point.
+
+
+@lianglia-apollo : Yes, for DEST obstacle, it can be ruled out using routing info. For general static objects, projecting each corner of 2d box onto reference line might be computationally too expensive. How about build a few layers (coarse to fine) of axis aligned 2d boxes (lane width can be used here) for the reference line and then does the collision detection in between the bounding box of obstacle and the ref line? At the top layer, the reference line is represented a big 2d AABox. If there is no collision in between them, we are done. If there is a collision, check the collision to the 2nd layer AABox of ref line. If there is no collision, we are done again, otherwise go to 3rd layer. Repeat the process till the final decision can be made.
+
+
+
+
+
+// Show Pointcloud error Dreamview #8137-
+
+
+Please run a bt to get the actual stacktrace.
+
+#0  0x00007f8e96f5dc37 in __GI_raise (sig=sig@entry=6) at ../nptl/sysdeps/unix/sysv/linux/raise.c:56
+#1  0x00007f8e96f61028 in __GI_abort () at abort.c:89
+#2  0x00007f8e97566535 in __gnu_cxx::__verbose_terminate_handler() () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#3  0x00007f8e975646d6 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#4  0x00007f8e97564703 in std::terminate() () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#5  0x00007f8e97564922 in __cxa_throw () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x0000000000fcabdd in google::protobuf::internal::LogMessage::Finish (this=0x7f8d2effeec0) at external/com_google_protobuf/src/google/protobuf/stubs/common.cc:268
+#7  0x0000000000fcac18 in google::protobuf::internal::LogFinisher::operator= (this=0x7f8d2effee9f, other=...) at external/com_google_protobuf/src/google/protobuf/stubs/common.cc:276
+#8  0x000000000068becf in google::protobuf::internal::RepeatedPtrFieldBase::Get<google::protobuf::RepeatedPtrField<apollo::drivers::PointXYZIT>::TypeHandler> (this=0x7f8d0c1b3c30, 
+    index=10971) at external/com_google_protobuf/src/google/protobuf/repeated_field.h:1482
+#9  0x000000000068922e in google::protobuf::RepeatedPtrField<apollo::drivers::PointXYZIT>::Get (this=0x7f8d0c1b3c30, index=10971)
+    at external/com_google_protobuf/src/google/protobuf/repeated_field.h:1919
+#10 0x000000000068737c in apollo::drivers::PointCloud::point (this=0x7f8d0c1b3c18, index=10971) at bazel-out/local-dbg/genfiles/modules/drivers/proto/pointcloud.pb.h:637
+#11 0x000000000068538b in apollo::dreamview::PointCloudUpdater::UpdatePointCloud (this=0x3cbdc50, point_cloud=std::shared_ptr (count 3, weak 0) 0x7f8d0c1b3c18)
+    at modules/dreamview/backend/point_cloud/point_cloud_updater.cc:166
+#12 0x0000000000684fec in apollo::dreamview::PointCloudUpdater::__lambda66::operator() (__closure=0x3d46a60, msg=std::shared_ptr (count 3, weak 0) 0x7f8d0c1b3c18)
+    at modules/dreamview/backend/point_cloud/point_cloud_updater.cc:129
+#13 0x0000000000686314 in std::_Function_handler<void(const std::shared_ptr<apollo::drivers::PointCloud>&), apollo::dreamview::PointCloudUpdater::Start()::__lambda66>::_M_invoke(const std::_Any_data &, const std::shared_ptr<apollo::drivers::PointCloud> &) (__functor=..., __args#0=std::shared_ptr (count 3, weak 0) 0x7f8d0c1b3c18)
+    at /usr/include/c++/4.8/functional:2071
+#14 0x00000000006981eb in std::function<void (std::shared_ptr<apollo::drivers::PointCloud> const&)>::operator()(std::shared_ptr<apollo::drivers::PointCloud> const&) const (
+    this=0x3d3b028, __args#0=std::shared_ptr (count 3, weak 0) 0x7f8d0c1b3c18) at /usr/include/c++/4.8/functional:2471
+#15 0x0000000000694bd5 in apollo::cyber::Reader<apollo::drivers::PointCloud>::Init()::{lambda(std::shared_ptr<apollo::drivers::PointCloud> const&)#1}::operator()(std::shared_ptr<apollo::drivers::PointCloud> const&) const (__closure=0x3d3f620, msg=std::shared_ptr (count 3, weak 0) 0x7f8d0c1b3c18) at ./cyber/node/reader.h:142
+#16 0x000000000069fd2f in std::_Function_handler<void (std::shared_ptr<apollo::drivers::PointCloud> const&), apollo::cyber::Reader<apollo::drivers::PointCloud>::Init()::{lambda(std::shared_ptr<apollo::drivers::PointCloud> const&)#1}>::_M_invoke(std::_Any_data const&, std::shared_ptr<apollo::drivers::PointCloud> const&) (__functor=..., 
+    __args#0=std::shared_ptr (count 3, weak 0) 0x7f8d0c1b3c18) at /usr/include/c++/4.8/functional:2071
+#17 0x00000000006981eb in std::function<void (std::shared_ptr<apollo::drivers::PointCloud> const&)>::operator()(std::shared_ptr<apollo::drivers::PointCloud> const&) const (
+    this=0x3d3f6e0, __args#0=std::shared_ptr (count 3, weak 0) 0x7f8d0c1b3c18) at /usr/include/c++/4.8/functional:2471
+#18 0x00000000006984b0 in apollo::cyber::croutine::RoutineFactory apollo::cyber::croutine::CreateRoutineFactory<apollo::drivers::PointCloud, std::function<void (std::shared_ptr<apollo::drivers::PointCloud> const&)> >(std::function<void (std::shared_ptr<apollo::drivers::PointCloud> const&)>&&, std::shared_ptr<apollo::cyber::data::DataVisitor<apollo::drivers::PointCloud, apollo::cyber::NullType, apollo::cyber::NullType, apollo::cyber::NullType> > const&)::{lambda()#1}::operator()() const::{lambda()#1}::operator()() const (__closure=0x3d3f6d0)
+    at ./cyber/croutine/routine_factory.h:61
+#19 0x00000000006a9ea2 in std::_Function_handler<void (), apollo::cyber::croutine::RoutineFactory apollo::cyber::croutine::CreateRoutineFactory<apollo::drivers::PointCloud, std::function<void (std::shared_ptr<apollo::drivers::PointCloud> const&)> >(std::function<void (std::shared_ptr<apollo::drivers::PointCloud> const&)>&&, std::shared_ptr<apollo::cyber::data::DataVisitor<apollo::drivers::PointCloud, apollo::cyber::NullType, apollo::cyber::NullType, apollo::cyber::NullType> > const&)::{lambda()#1}::operator()() const::{lambda()#1}>::_M_invoke(std::_Any_data const&) (__functor=...) at /usr/include/c++/4.8/functional:2071
+#20 0x00000000004ad786 in std::function<void ()>::operator()() const (this=0x3d3f670) at /usr/include/c++/4.8/functional:2471
+#21 0x0000000000d400c0 in apollo::cyber::croutine::CRoutine::Run (this=0x3d3f658) at ./cyber/croutine/croutine.h:143
+#22 0x0000000000d3f715 in apollo::cyber::croutine::(anonymous namespace)::CRoutineEntry (arg=0x3d3f658) at cyber/croutine/croutine.cc:43
+#23 0x0000000000000000 in ?? ()
+
+
+
+
+
+// Cyber can monitor and evaluate the performance of each module #7968
+cyber/setup.bash
+How can cyber monitor the scheduling and execution time of each module? Detecting the execution time of each task can meet the requirements? I found that by setting cyber_sched_perf=1, I can open the event log of task switching. Is there a visual tool available?
+
+
+If "cyber_sched_perf=1" is set, will it affect performance? How can we measure it? How can we measure the performance of each module task and arrange the scheduling strategy reasonably?
+
+hi, zyffei, i think there is 3 questions you ask here~ answers as follows:
+
+questions about cyber_sched_perf?
+Answer: perf event is developed for scheduler debugging, it record scheduler event like notify、swap_in、swap_out etc... it's not suitable for module proc time statistic, because module's proc function(it is croutine in cyber) may swap_in && swap_out several times, it is hard to organize these events together to calc module proc time. finally, perf event certainly will affect performance(about 5%~10% E2E latency jitter), so we use it as offline debug tool when we meet framework performance issues
+How can we measure the performance of each module task ?
+Answer: we have a E2E latency statistic && analysis tool for inner online use, but it's not suitable for all auto-drive products for now. we will have an internal discussion of this. i suggest u can try print logs in the proc start point && end point to statistic module proc time for debug purpose~ or transform a sensor time stamp from driver to control to make statistic of E2E(end to end) latency for you to improve total performance && tail performance
+arrange the scheduling strategy reasonably?
+Answer: we suggest developers use classic scheduler policy for common use or for the beginning. if u are already familiar with cyber, u can try choreo schedule policy to achieve higher performance, the advantage of choreo is its determinacy by binding related tasks to unique processor and given enough computing resource, the disadvantage of choreo is if we didn't binding tasks properly(total execute time of tasks in same processor exceed the period of sensor data related to them), we will gain a poor E2E performance. u can use choreo policy as follows:
+a. tasks in auto-driving car organized as a DAG(Direct Acyclic Graph);
+b. the task in the critical path(most important path in DAG, for example modules like lidar driver、perception、planning、control etc.) should bind to same processor as possible for better cpu locality
+c. children node should have a higher priority than it's father node
+d. total execute time of tasks in same processor won't exceed the period of sensor data;
+e. we can arrange other tasks which is not in the critical path into the processor pool temporary;
+f. we packaged linux sched confs into cyber sched conf, u can set linux sched policy && sched priority && pin cyber sched processor to proper cpus as u need. u can set linux sched policy according to this article: https://drkp.net/papers/latency-socc14.pdf
+you can access to cyber/conf/example_sched_choreography.conf && cyber/conf/example_sched_classic.conf for more details
+
+
+Thank you very much. Now we analyze the execution time of proc almost according to the method mentioned in Point 2. Is your tool measurement available in actual automatic driving? Do you need to modify cyber code? Will it affect performance?
+
+
+as metioned above, perf event in cyber is for offline debug purpose, it can run in actual automatic driving, but i suggest turn off this tool if we run auto driving for mpi(online)~ "export cyber_sched_perf=1" in setup.bash if u need debug offline. then follow the output to analysis framework performance according to the enum follows:
+enum class SchedPerf {
+SWAP_IN = 1,
+SWAP_OUT = 2,
+NOTIFY_IN = 3,
+NEXT_RT = 4,
+RT_CREATE = 5,
+};
+
+
+
+
+
+// Carla 0.9.x Apollo bridge #7774
+
+
+@volprjir Hi, you can check LGSVL simulator which already supports connecting with Apollo 3.5. You can see the demo here. You can try it with their Apollo 3.5 fork.
+https://github.com/lgsvl/simulator
+
+
+Could we summarize the options to connect Apollo to Carla?
+
+1.Cyber Python API (examples)
+2. LGSVL Bridge
+3.[Cyber C++ API] + [Carla C++ API]
+This way should be better for debugging. We could move on Cyber Python API after this.
+Because the attempt on Cyber Python API has not been successful. #7957
+
+4. [Cyber C++ API] + [Carla python API], the server-client way like LGSVL Bridge, with a python wrapped C++ client or server at the Carla side.
+Is there any other option?
+
+LGSVL Bridge
+https://github.com/lgsvl/apollo-3.5/tree/simulator/cyber/bridge
+
+
+
+
+
+// Question: Can we visualize point cloud data using Dreamview? #6909
+
+
+Problem:
+I wonder if we can visualize our own point cloud data in Dreamview just like rviz. I have tried to visualize my own point cloud data in dreamview by publishing the data into the topic "/apollo/sensor/velodyne64/compensator/PointCloud2". I have lit up the button of "velodyne" in the Dreamview, but cannot visualize the point cloud. Have I done it in a wrong way? Or is there a correct way/tutorial about visualizing point cloud data in Dreamview?
+
+I have solved this problem by feeding a localization message into "/apollo/localization/pose" topic. It seems that at least we need the message from these two topics to visualize our own point clouds in dreamview.
+
+
+
+
+
+
+// A problem in Lat controller lateral_error calculation #9070
+
+// modules/control/controller/lat_controller.cc
+  double lateral_error = cos_target_heading * dy - sin_target_heading * dx;
+
+
+  // raw lateral error #2786
+case 1: when the car is on the top of lane centerline, dx < 0 (x_current - x_des) , dy > 0. (y_current - y_des) , we can use raw_lateral_error = cos_theta * dy - sin_theta * dx;
+
+case 2: when the car is on the down of the lane centerline, dx < 0 (x_current - x_des), , dy < 0. (y_current - y_des), in this case, maybe we can not still use this formula of raw_lateral_error = cos_theta * dy - sin_theta * dx;
+
+The dx is always minus one, since we have to make the sedan to follow the future trajectory points which are always in front of the sedan. However, the sign of the dy depends on which side(top or down of the lane centerline) the sedan is located.
+
+
+
+
+
+// Log Design in 3.5 #7427
+
+There has been a lot of changes for logging from 3.0 to 3.5. I had a lot of questions regarding the design and configuration of logging in 3.5.
+
+1. Was it intentional to have the minloglevel as part of the symlink name for latest log per module? The output from glog is /apollo/data/MODULE_NAME.MINLOGLEVEL, but I am not sure that the MINLOGLEVEL part should be there.
+Answer the question No.1:
+Yes, we followed the link name generation rules of glog.
+In glog project: https://github.com/google/glog/blob/master/src/logging.cc#L932
+In apollo project: https://github.com/ApolloAuto/apollo/blob/master/cyber/logger/log_file_object.cc#L171
+
+
+
+2. I noticed that GLOG_alsologtostderr=0 in cyber/setup.bash. This means that DEBUG, INFO, and WARN will not be output to terminal or redirected to nohup.out. By specifying this glog parameter, there are essentially two log levels. The C++ cyber examples do not print anything to terminal, unless GLOG_alsologtostderr=1 is passed in before bazel-bin/cyber/examples/talker or bazel-bin/cyber/examples/listener. Was this intentional?
+
+Answer the question No.2:
+The "cyber/setup.bash" file contains some default environment variables. In most cases, we do not want to log to standard error because this will increase the system load. So we just default output the error log. You can customize the "cyber/setup.bash" file and set GLOG_alsologtostderr to 0.
+
+
+
+3.Most scripts and dreamview start programs through nohup and redirect the output to a single nohup.out file in the root directory. Was it meant to go in data/log? Also, was it meant for all of the output filenames to be the same?
+
+
+
+
+
+4. I was not  sure what module means in context of logging. It is set by copts = ["-DMODULE_NAME=\\\"module_name\\\""], in the BUILD file. It can be confusing, because common, compiled libraries will have the same module_name. In compiled libraries it is similar to __FUNCTION__, __LINE__, and __FILE__. Could those be used instead? If the header file has inline function that log, it will have different MODULE_NAME definitions. If a cyber program crashes, it is not obvious what the FATAL log file will be named, since it does not correlate to program, component, or dag name. If headers are precompiled, this macro will also slow down compilation. Also, the nohup.out will have text from other programs so a FATAL message will not be at the end of it. Should it use the dag name instead?
+
+Answer the question No.4:
+As you pointed out，the MODULE_NAME macro variable to split the log file is not a best practice.
+We are developing new logging features, like split the log file according to component name or module name defined in dag file.
+
+
+
+
 
 
 

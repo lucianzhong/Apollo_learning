@@ -1,4 +1,3 @@
-
 //////////////////////////////////////////////////////////////
 
 1. rancher									// ubuntu & window need different environment for each other in rancher
@@ -15,7 +14,8 @@
 
 		use name: root
 
-3. Need to download Cybertron2 manually   // ubuntu16 // git config --global credential.helper store   // repeatedly inputs of password
+3. Need to download Cybertron2 manually   // ubuntu16 // git config --global credential.helper store   // repeatedly inputs of password      // sudo git clone http://git.51vr.local/51World/Cybertron.git
+
 										// Download Cybertron, copy file in Cyberstron to Cybertron2 // sudo cp -rf Cybertron/* Cybertron2/
 
 4. rm submodule /Cybertron2/apollo
@@ -47,7 +47,7 @@
 8.
 	root@apollo5-apollo-ubuntu14-1:/Cybertron2/Samples/Common# 
 																	vim /Cybertron2/Samples/Common/Config.sh
-																		export CoordinatorIp=10.2.35.104
+																		export CoordinatorIp=10.2.35.156
 
 
 
@@ -81,7 +81,7 @@ lrwxrwxrwx  1 root root       62 Aug  7 08:59 CybertronBridgeApollo -> /Cybertro
 	 source ./scripts/apollo_base.sh
 
 
-		run apollo and dreamview
+		run apollo and dreamview:windows
 		/apollo
 			kill.sh
 			run.sh
@@ -94,6 +94,8 @@ lrwxrwxrwx  1 root root       62 Aug  7 08:59 CybertronBridgeApollo -> /Cybertro
 
 
 // use preStart.py to generate sim_map and routing_map
+
+	cd 	/apollo/bazel-out/local-dbg/bin/CyberBridge/
 
 python preStart.py  --url=  --md5=  --loop=0  --scene_name=aachen
 

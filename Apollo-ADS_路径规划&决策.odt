@@ -1,0 +1,234 @@
+﻿Reference:
+https://blog.csdn.net/chepwavege/article/category/9156687
+
+
+
+1. 
+3.0以前，Apollo 用一套规划算法处理所有case.
+3.5之后，改成场景base 的规划算法，scenario-based planning
+针对不同场景（车道中心保持，停车（车库停车，靠边停车 ...），掉头，十字路口(有红绿灯，无红绿灯 ...），选用不同的规划算法，生成profile，再执行。
+
+其中decider --是基于规则的规划--也不是最理想的，会有bug，有遗漏...
+
+Apollo FSM: A finite state machine that determines the vehicle state given its location and routing together with HD Map.
+有限状态机，还是有缺陷的，bug易发。
+Planning Dispatcher: Call an appropriate planner given the vehicle's state and some other relevant information
+Planner: Obtain the required context data and other information, decide a corresponding vehicle intention, execute the required planning tasks for this intention and generate the planning trajectory. It will also update the context for future jobs.
+Deciders & Optimizers: A set of stateless libraries that implement decision tasks and various optimizations. Optimizers specifically optimize the vehicle's trajectory and speed. Deciders are rule-based decision makers that advise on when to change lane, when to stop, creep(慢行） or when the creep is complete.
+Yellow box: These boxes are included for future scenarios and/or developers to contribute their own scenarios based on real-world driving use cases
+
+basic knowledge:
+ADS 里面的规划-THINK 模块（做决策的模块），根本是个优化问题，在考虑众多约束下，车辆的kinematics约束，驾驶舒适性的约束,交通规则的约束，伦理道德的约束（保护ego还是保护他人？），感知层提供的约束（障碍物，红绿灯，限速etc）
+
+得到一个最优解！
+
+input:
+basic knowledge:
+ADS 里面的规划-THINK 模块（做决策的模块），根本是个优化问题，在考虑众多约束下，车辆的kinematics约束，驾驶舒适性的约束,交通规则的约束，伦理道德的约束（保护ego还是保护他人？），感知层提供的约束（障碍物，红绿灯，限速etc）
+
+得到一个最优解！
+
+input:
+	Routing
+	感知和预测
+	车辆状态和定位
+	高清地图
+
+
+output:
+输出数据包括总时间、总长度和确切的路径信息，输出数据由控制单元解析执行，输出数据结构定义在repeated apollo.common.TrajectoryPointtrajectory_point
+简单来说就是包含了，路径的点（多个）--曲线方程的要素， 比如起始点，中间点，通过时间，路径的累计arc length,速度，线性加速度。曲率 etc.
+/r3.5.0/modules/common/proto/pnc_point.proto
+
+
+
+message TrajectoryPoint {
+// path point
+optional PathPoint path_point = 1;
+// linear velocity
+optional double v = 2; // in [m/s]
+// linear acceleration
+optional double a = 3;
+// relative time from beginning of the trajectory
+optional double relative_time = 4;
+// longitudinal jerk
+optional double da = 5;
+// The angle between vehicle front wheel and vehicle longitudinal axis
+optional double steer = 6;
+}
+
+message Trajectory {
+optional string name = 1;
+repeated TrajectoryPoint trajectory_point = 2;
+}
+
+Deciders 包括 traffic decider, path decider and speed decider.
+
+Path Optimizers 为DP/QP path optimizers.
+
+Speed Optimizers 为DP/QP speed optimizers.
+
+DP表示动态规划（dynamic programming），QP表示二次规划（quadratic programming）。经过计算步骤后，最终的路径数据经过处理后传递到下一个节点模块进行路径的执行。
+
+
+理论学习：
+https://arxiv.org/abs/1807.08048  Baidu Apollo EM Motion Planner
+
+论文理解：APOLL 基于场景做不同的路径规划， 路径规划时，同时时刻判断是否满足少量的规则（包含交通规则，障碍无边界 等等）（不同于那些大量基于规则的规划）
+
+1.input: HDmap ,route,locationzation( camera ,lidar 获得的参考线（中心线）），GPS 的ego坐标
+2.preprocess: 场景划分模块，根据当前ego的状态，判断属于哪个场景？ （基于场景的规划，泊车，跟车，靠边停车。。。可以扩展添加场景）； 优化参考线方程（多项式）
+3.core process:frenet 坐标转换，（障碍物都投影，创建规划栅格图，比如前方200ms）一次性生成所有的路径 ，n条
+	1.路线规划： DP, 粗规划，决定从障碍物的左边通过，还是右边通过，等(基于规则的决策，比如车			道线只能向左变道，这个时候就要挑选左边的变道路线），缩小规划空间--输出1条路径
+	2.QP 细规划， 获得1条优化的路径
+	3.速度规划： 以优化的路径作为输入，DP 速度粗规划，加速减速的时机，策略。
+	4.QP 细规划
+	5.迭代路径，速度规划，获得最优解
+4. 输出给执行器执行。
+
+
+
+路径生成过程：(参考论文Optimal Trajectory Generation for Dynamic Street Scenarios in a Frenet Frame 2010_paper）
+pre: 笛卡尔-->frenet 坐标系 （投影）
+1. 开始条件 -->终止条件，方法一：一次性生成所有的路径集。
+
+根据设计目标定义终止条件，比如车道保持，就是d'横向速度，d''加速度=0) 
+
+
+
+纵向控制同理： 终止条件就变成了ego的速度，加速度 （vset+ timeGap）--由前车的状态（传感器直接测量-已知）获得
+右边是终止条件：第一项是路径长度（弧长）--车距，V_longitude，Acc_longitude, 时间）
+
+2. 定义cost 函数
+
+
+
+如，横向cost函数---横向jerk +总时间+ 横向offset
+
+纵向cost函数：--jerk, 时间sd目标车距，
+
+3.筛选过程 ：把横纵向的路径cost函数合并， 获取可用路径
+
+Ctot=
+k为权重参数，如果纵向参数>>横向，ego 就会很激进，一直尝试超车。。。标定横重要！）
+
+结合 a. obstacle  collsion free ; b. 约束输入条件(舒适性，车身动力学，转向角度（or heading angel ），曲率啊，
+---这些约束需要再进行坐标转换 frenet-->笛卡尔 。
+
+输出可用的路径，一般2条-一条是本车道，一条变道。example:
+
+
+（a）多车道规划 ：所有的车道，障碍物，环境信息，都投影到 lane-based Frenet frames. 
+然后选出2条车道，一条默认的(mission plan 获取的路径），一条备选的(变道操作）。 针对这2条车道，并行生成2条路径（speed &steering）（单车道内的规划）最后通过一个选择器。选择最优的那一条。
+
+
+输入约束：
+
+1.安全性约束-- 要遵守交通规则，要能应对危险的case( OEDR-object  & event detection and  response) 
+
+规划多长的时间窗口算安全?-- 8s 或200m （apollo）,  200m/150kph*3.6 =4.8s, 如果是对向开，*2 ，9.6s. 
+规划模块的运行周期 cycle time 多快 才能保证安全？ 100ms (apollo), 人的反应时间一般300ms。规划模块如果运行的周期过大，可能会超调（下图第二幅图）。过快，超调了，调整太频繁也不行
+当然允许情况下，快一点还是安全的（下图上）--驾驶更舒适
+
+
+
+
+
+2.乘员的舒适性 Ax, Ay constrains
+
+3.车辆动力学约束（kenmatics constrains）
+（b）单车道内的规划（speed & steering profile planning）--注意，即使同一车道内，可以有多组路径（不同速度，不同曲率）
+
+规划维度： 时间t, 横向x, 纵向y , 3D
+
+如果直接3D规划，资源开销特别大。还慢，不满足时效性要求
+
+解决S1: 降维， 把速度和转向解耦。。变成2维问题。单独串行迭代考虑。线进行路径的规划，然后再速度规划。
+
+这种方法对于低速的动态障碍物还是比较好的，如果是高速的动态障碍物。这个时候推荐变道操作，而不是维持在原有路径下，越来越逼近，会十分危险。
+
+
+
+Apollo_ADS_路径规划- frenet 坐标系
+
+在大地坐标下：
+
+无人车首先要知道红色车的位置。通过传感器得到目标在车辆坐标系下的坐标，车辆的笛卡尔坐标系下坐标可以由惯导得到，可以推出目标在笛卡尔坐标下的位置信息，然后再和道路坐标比较，判断红色车辆在哪条车道内。
+
+在frenet坐标下：
+
+可以看出在frenet坐标下，车相对于道路的位置信息更加清楚。
+
+Apollo_ADS_路径规划1_道路中心线表示& 平滑_Reference Line Smoother
+我们有n 个点 （x,y）， 在笛卡尔坐标系下 , 可以拟合一条曲线。Y关于X
+
+同样的，如果在frenet frame 坐标下，ego的坐标（0,0），传感器 拍摄到 n 个车道中心线（曲线）的 坐标，一段一段， 采样时间也是固定的。 --不变道，这条参考线保持不变，在此基础上做后面的S-T , S-L 规划。
+
+对于中心线， 先得到笛卡尔坐标下表示， x 关于 时间t, y 关于时间t, 2个多项式方程
+
+以 车道线中心为参考坐标系。得到 frenet下 ego的坐标（station,lateral）s--arc 沿曲线走过的累计长度，l--横向的offset
+
+随着时间的增加， ego 走过n个点，（s,l） 拟合成一条曲线（N次多项式-可以配置）， L 关于S的方程. 这个就是ego 的行驶轨迹。--站点信息。（实际上就是X,Y的关系）
+
+同样的 S-T frame 下得到， arc length (纵向位置）关于时间的函数，求微分就可以得到速度，加速，jerk  -->得到不同时刻加速还是减速的信息。---完成速度profile 的定义
+
+Reference Line Smoother---优化目标是曲线的Jerk
+Quadratic programming（二次规划）） + Spline（样条曲线） interpolation
+
+1. Objective function
+1.1 Segment routing path 建立数学模型
+Segment routing path into n segments. each segment trajectory is defined by two polynomials（多项式）:
+关于时间的多项式函数，x--纵向位置，y--横向位置 ， t=0 ,得到初始点坐标，t=1,1s后的坐标，t=3,3s后的坐标 …
+v恒定时，t可以换成 v*t=arc length
+求一次导数得到速度，二阶-加速度，三阶-jerk 
+
+
+
+1.2 Define objective function of optimization for each segment  定义目标函数
+
+为什么定义这个形式？三阶导数 ，然后平方，得到的函数再求积分
+
+只是cost 函数的定义方法，同数学里面的方差定义，平方以后可以让误差放大，更容易比较，（去除了符号的影响）， jerk 平方后求累积值（积分）
+
+
+
+1.3 Convert the cost function to QP formulation 
+转换成二次规划的形式--规划问题，核心不是计算，而是如何建模。
+QP formulation:
+
+
+
+
+
+
+2 Constraints
+2.1 Joint smoothness constraints 连接处的平顺性
+This constraint smoothes the spline joint. Let's assume two segments, and , are connected and the accumulated s of segment is  Calculate the constraint equation as:
+
+第一段的从时间t :0---t , arc length 变换 s0-sk  （假设速度恒定，匀速圆周运动， t= s）
+
+第二段一样，时间从0-t+1, arc length 变化：s0-sk+1
+
+连接处2段曲线方程相交，对应的加速度，jerk etc.
+
+
+
+
+
+
+
+
+
+
+时间都是从s0~sk, 坐标是k段的结束，右边是k+1段的开始。当然连接啦！
+
+Similarly the formula works for the equality constraints, such as:
+
+
+Apollo_ADS_路径规划2- 路径优化 --SL 轨迹 Optimizer
+
+
+
+
+
+
