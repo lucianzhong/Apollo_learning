@@ -1,0 +1,56 @@
+
+提示信息说的很清楚，
+当前分支有未跟踪的文件，checkout 命令会覆盖它们，请缓存( stash )或者提交( commit )。
+
+//第一种方式 存到暂存区
+git add.
+git stash 
+//取出的时候使用 
+git stash pop
+
+//第二种方式 发起一个commit 存到提交历史
+git add.
+git commit -m "commit message"
+
+
+
+git clean n  //这个是清除文件预览
+git clean -f //强制清除文件
+
+
+强制切换分支
+
+强制切换分支命令如下，结果同提示说的那样，会直接覆盖未跟踪的文件。这个方式我觉得很是粗暴，我们日常切换的时候，还是不要使用 -f 强制切换，没有覆盖提示，很容易发生文件修改丢失，但是我们自己不知道。
+
+git checkout -f <branch>
+
+工作区（Working Directory）	我们直接编辑的文件部分
+暂存区（Staged Snapshot）	文件执行 git add .后存的地方
+版本库区 (Commit History)	文件执行 git commit .后存的地方
+
+
+git reset --hard
+
+
+git checkout -b lucianzhong_5.0  
+git checkout lucianzhong_5.0
+
+git branch
+
+
+git config --global user.name "ZhongYong"
+
+
+git status
+
+
+ git commit --amend 
+
+ git push -f origin decode_map
+
+ git  clean  -f
+
+ 将所有untracked file 一次性删除
+
+
+ git reset --soft 131429fa8dd90a918fc8f48c6bf8db8c8606b95b
