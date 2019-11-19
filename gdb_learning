@@ -1,0 +1,34 @@
+ulimit -c unlimited
+
+再用 ulimit -a查看，发现对-c的修改已经生效了：
+
+
+
+设置core_pattern
+出了上面的ulimit设置，我们还需要设置core_pattern，即发送core dump后，对core文件执行什么操作，这个可以通过查看/proc/sys/kernel/core_pattern文件来得到，在Ubuntu 16.04上面，上述文件内容如下：
+
+$ cat /proc/sys/kernel/core_pattern
+|/usr/share/apport/apport %p %s %c %P
+其中的l表示执行后面的命令，而后面的apport是Ubuntu的bug反馈的工具，因此在Ubuntu下，默认的core dump 段错误处理机制是将其作为一个bug，进行bug检查，如果是bug的话就进行上报。
+在这种设定下，我们没法用gdb来调试我们程序的错误。
+因此这里我们得修改core_pattern的内容，将其修改为core即可。但是没有找到修改core_pattern文件的方式，因为它本身不是一个实体的文件，所以这里有个小技巧来实现这个功能：暂停apport服务：
+
+sudo service apport stop
+然后查看core_pattern的内容：
+
+$ cat /proc/sys/kernel/core_pattern
+core
+
+
+gcc/g++设置debug模式
+除了上面的两项设置，这里还需要在编译代码的时候通过加-g参数来启用debug模式，这样会在生成的可执行文件中加入调试信息：
+
+g++ -g xxx.cpp
+gcc -g xxx.c
+采用gdb来调试程序
+完成上面的设置之后，就可以使用gdb来调试了，当程序发生段错误，而且core文件也生成后，通过执行下面的命令来开始调试：
+
+gdb ./a.out core
+
+
+bt
