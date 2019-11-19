@@ -32,3 +32,40 @@ gdb ./a.out core
 
 
 bt
+
+
+
+
+list  l    显示多行源代码
+
+break  b  设置断点,程序运行到断点的位置会停下来
+
+info  i  描述程序的状态
+
+run   r  开始运行程序
+
+display  disp   跟踪查看某个变量,每次停下来都显示它的值
+
+step  s  执行下一条语句,如果该语句为函数调用,则进入函数执行其中的第一条语句
+
+next  n    执行下一条语句,如果该语句为函数调用,不会进入函数内部执行(即不会一步步地调试函数内部语句)
+
+print  p   打印内部变量值
+
+continue   c   继续程序的运行,直到遇到下一个断点
+
+set var name=v   设置变量的值
+
+start   st  开始执行程序,在main函数的第一条语句前面停下来
+
+file  装入需要调试的程序
+
+kill   k   终止正在调试的程序
+
+watch   监视变量值的变化
+
+backtrace  bt   查看函数调用信息(堆栈)
+
+frame   f   查看栈帧  f n 切换到编号为n的栈
+
+quit  q   退出GDB环境
