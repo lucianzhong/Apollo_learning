@@ -49,6 +49,7 @@ git status
  git push -f origin decode_map
 
  git  clean  -f
+ git clean -fd 
 
  将所有untracked file 一次性删除
 
