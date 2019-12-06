@@ -13,6 +13,10 @@ git add.
 git commit -m "commit message"
 
 git push origin odr_parser_for_left_driving
+使用 git push 将本地分支上的提交推送到远程仓库。
+git push 命令使用两个参数：
+远程命令，如 origin
+分支名称，如 master
 
 git clean n  //这个是清除文件预览
 git clean -f //强制清除文件
