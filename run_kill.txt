@@ -1,0 +1,42 @@
+export LD_LIBRARY_PATH=/usr/local/lib64:$LD_LIBRARY_PATH
+source /apollo/scripts/apollo_base.sh
+
+
+source scripts/apollo_base.sh
+
+cyber_launch start /apollo/modules/dreamview/launch/dreamview.launch
+
+
+
+ps -ef | grep /apollo/cyber | grep -v -E 'grep' | awk -F " " '{print $2}' | xargs kill -7
+ps -ef | grep mainboard | grep -v -E 'grep' | awk -F " " '{print $2}' | xargs kill -7
+ps -ef | grep dreamview | grep -v -E 'grep' | awk -F " " '{print $2}' | xargs kill -7
+
+
+
+
+export LD_LIBRARY_PATH=/usr/local/lib64:$LD_LIBRARY_PATH
+source /apollo/scripts/apollo_base.sh
+cyber_launch start /apollo/modules/localization/launch/localization.launch  &
+sleep 1
+cyber_launch start /apollo/modules/prediction/launch/prediction.launch  &
+sleep 1
+cyber_launch start /apollo/modules/routing/launch/routing.launch  &
+sleep 1
+cyber_launch start /apollo/modules/planning/launch/planning.launch  &
+sleep 1
+cyber_launch start /apollo/modules/control/launch/control.launch  &
+sleep 1
+cyber_launch start /apollo/modules/dreamview/launch/dreamview.launch  &
+#/apollo/bazel-bin/modules/localization/localization --flagfile=/apollo/modules/localization/conf/localization.conf &
+#sleep 1
+#/apollo/bazel-bin/modules/perception/perception --flagfile=/apollo/modules/perception/conf/perception.conf --stderrthreshold=3 &
+#/apollo/bazel-bin/modules/prediction/prediction --flagfile=/apollo/modules/prediction/conf/prediction.conf &
+#/apollo/bazel-bin/modules/planning/planning --flagfile=/apollo/modules/planning/conf/planning.conf --stderrthreshold=3 &
+#sleep 1
+#/apollo/bazel-bin/modules/canbus/canbus --flagfile=/apollo/modules/canbus/conf/canbus.conf &
+#sleep 1
+#/apollo/bazel-bin/modules/routing/tools/routing_tester &
+#/apollo/bazel-bin/modules/routing/routing --flagfile=/apollo/modules/routing/conf/routing.conf &
+#/apollo/bazel-bin/modules/control/control --flagfile=/apollo/modules/control/conf/control.conf &
+#/apollo/bazel-bin/modules/dreamview/dreamview --flagfile=/apollo/modules/dreamview/conf/dreamview.conf &
