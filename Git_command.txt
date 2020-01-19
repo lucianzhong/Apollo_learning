@@ -51,6 +51,14 @@ git status
  git commit --amend 
 
  git push -f origin decode_map
+ 
+ 
+ vs code格式化代码的快捷键如下：（来源于这里）
+
+    On Windows Shift + Alt + F
+    On Mac Shift + Option + F
+    On Ubuntu Ctrl + Shift + I
+ 
 
  git  clean  -f
  git clean -fd 
