@@ -1,0 +1,43 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "(gdb) Attach",
+            "type": "cppdbg",
+            "request": "attach",
+            "program": "/apollo/bazel-bin/cyber/mainboard.runfiles/apollo/cyber/mainboard",
+            "processId": "${command:pickProcess}",
+            "MIMode": "gdb",
+            "sourceFileMap": {
+                "/proc/self/cwd": "/apollo"
+            },
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ]
+        },
+        {
+            "name": "(gdb) Launch",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "/apollo/bazel-bin/cyber/mainboard.runfiles/apollo/cyber/mainboard",
+            "args": [ "-d", "/apollo/modules/planning/dag/planning.dag", "-p", "planning", "-s", "CYBER_DEFAULT"],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ]
+        }
+      
+    ]
+}
